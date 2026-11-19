@@ -43,6 +43,11 @@ class CanvasErrorBoundary extends React.Component<
 export default function App() {
   const mode = useGeometryStore((s) => s.mode);
   const view = useGeometryStore((s) => s.view);
+  const updateView = useGeometryStore((s) => s.updateView);
+  const scene2d = useGeometryStore((s) => s.scene2d);
+  const scene3d = useGeometryStore((s) => s.scene3d);
+  const activeTool2D = useGeometryStore((s) => s.activeTool2D);
+  const activeTool3D = useGeometryStore((s) => s.activeTool3D);
   const sidebarOpen = useGeometryStore((s) => s.sidebarOpen);
   const toast = useGeometryStore((s) => s.toast);
   const clearToast = useGeometryStore((s) => s.clearToast);
@@ -123,6 +128,30 @@ export default function App() {
   const show2D = mode === '2d' || mode === 'split';
   const show3D = mode === '3d' || mode === 'split';
 
+  const is2DEmpty =
+    scene2d.points.length +
+      scene2d.segments.length +
+      scene2d.lines.length +
+      scene2d.vectors.length +
+      scene2d.circles.length +
+      scene2d.conics.length +
+      scene2d.polygons.length +
+      scene2d.functions.length +
+      scene2d.inequalities.length ===
+    0;
+
+  const is3DEmpty =
+    scene3d.points.length +
+      scene3d.segments.length +
+      scene3d.lines.length +
+      scene3d.vectors.length +
+      scene3d.planes.length +
+      scene3d.polyhedra.length +
+      scene3d.solids.length +
+      scene3d.surfaces.length +
+      scene3d.crossSections.length ===
+    0;
+
   return (
     <div
       className={`flex h-screen w-screen flex-col overflow-hidden ${
@@ -148,6 +177,42 @@ export default function App() {
             <FloatingToolbar domain="2d" compact={mode === 'split'} />
             <div className="relative min-h-0 flex-1 overflow-hidden">
               <Canvas2D />
+              {is2DEmpty && activeTool2D === 'select' && (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
+                  <div
+                    className={`pointer-events-auto flex max-w-sm flex-col items-center gap-3 rounded-xl border px-5 py-4 text-center shadow-xs ${
+                      isDark
+                        ? 'border-slate-800 bg-slate-900/90 text-slate-200'
+                        : 'border-[#E2E7EE] bg-white/95 text-[#0F1B2D]'
+                    }`}
+                  >
+                    <div className="text-sm font-semibold">Bảng vẽ 2D đang trống</div>
+                    <p className={`text-xs leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      Chọn công cụ phía trên để chấm điểm / vẽ hình, nhập hàm số ở ô bên trái hoặc bật hệ trục Oxy khi cần.
+                    </p>
+                    <div className="flex flex-wrap items-center justify-center gap-2 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => updateView({ showAxes: !view.showAxes, showGrid: !view.showAxes })}
+                        className={`rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                          isDark
+                            ? 'border-slate-700 bg-slate-800 hover:bg-slate-700'
+                            : 'border-[#CBD5E1] bg-[#FAFBFD] hover:bg-slate-100'
+                        }`}
+                      >
+                        {view.showAxes ? 'Tắt trục Oxy' : 'Bật trục Oxy & lưới'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => window.dispatchEvent(new Event('hinhhocviet-open-presets'))}
+                        className="rounded-md bg-[#1D5CE5] px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-[#174CC2]"
+                      >
+                        Mẫu đề THPT
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
               <ContextActionBar domain="2d" />
               {mode === 'split' && (
                 <div
@@ -168,6 +233,49 @@ export default function App() {
               <CanvasErrorBoundary>
                 <Viewport3D />
               </CanvasErrorBoundary>
+              {is3DEmpty && activeTool3D === 'select' && (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
+                  <div
+                    className={`pointer-events-auto flex max-w-md flex-col items-center gap-3 rounded-xl border px-5 py-4 text-center shadow-xs ${
+                      isDark
+                        ? 'border-slate-800 bg-slate-900/90 text-slate-200'
+                        : 'border-[#E2E7EE] bg-white/95 text-[#0F1B2D]'
+                    }`}
+                  >
+                    <div className="text-sm font-semibold">Không gian vẽ 3D đang trống</div>
+                    <p className={`text-xs leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      Dựng nhanh hình chóp, lăng trụ, nón–trụ–cầu, nhập tọa độ Oxyz ở bảng bên trái, hoặc bật hệ trục tọa độ bất cứ lúc nào.
+                    </p>
+                    <div className="flex flex-wrap items-center justify-center gap-2 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => window.dispatchEvent(new Event('hinhhocviet-open-builder'))}
+                        className="rounded-md bg-[#0E9F6E] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0B835B]"
+                      >
+                        + Tạo hình khối & Oxyz
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateView({ showAxes: !view.showAxes, showGrid: !view.showAxes })}
+                        className={`rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                          isDark
+                            ? 'border-slate-700 bg-slate-800 hover:bg-slate-700'
+                            : 'border-[#CBD5E1] bg-[#FAFBFD] hover:bg-slate-100'
+                        }`}
+                      >
+                        {view.showAxes ? 'Tắt trục Oxyz' : 'Bật trục Oxyz'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => window.dispatchEvent(new Event('hinhhocviet-open-presets'))}
+                        className="rounded-md bg-[#1D5CE5] px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-[#174CC2]"
+                      >
+                        Mẫu đề THPT
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
               <ContextActionBar domain="3d" />
               {mode === 'split' && (
                 <div

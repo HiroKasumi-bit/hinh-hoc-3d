@@ -155,8 +155,11 @@ interface GeometryStore {
   toggleSegment3DStyle: (id: string) => void;
 }
 
-const initialPreset = THPT_PRESETS.find((p) => p.id === 'g11-pyramid-sa-perp')!;
-const initialSnap = initialPreset.build();
+const initialEmptySnap = cloneSnapshot({
+  sliders: [],
+  scene2d: EMPTY_SCENE_2D,
+  scene3d: EMPTY_SCENE_3D,
+});
 
 export const useGeometryStore = create<GeometryStore>((set, get) => ({
   mode: '3d',
@@ -164,22 +167,22 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
   activeTool3D: 'select',
   pendingIds: [],
   selection: [],
-  sliders: initialSnap.sliders,
-  scene2d: initialSnap.scene2d,
-  scene3d: initialSnap.scene3d,
+  sliders: initialEmptySnap.sliders,
+  scene2d: initialEmptySnap.scene2d,
+  scene3d: initialEmptySnap.scene3d,
   view: {
-    showAxes: true,
-    showGrid: true,
+    showAxes: false,
+    showGrid: false,
     showLabels: true,
     snapToGrid: true,
     autoDashedHiddenEdges: true,
     globalFaceOpacity: 0.16,
-    showOxyPlane3D: true,
+    showOxyPlane3D: false,
     theme: 'light',
   },
   cameraRequest: null,
   toast: null,
-  activePresetId: initialPreset.id,
+  activePresetId: null,
   sidebarOpen: true,
   past: [],
   future: [],
@@ -250,11 +253,18 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
     if (!preset) return;
     get().pushHistory();
     const snap = preset.build();
-    set({
+    const needsCoords = preset.grade === 10 || preset.grade === 12;
+    set((s) => ({
       mode: preset.mode,
       sliders: snap.sliders,
       scene2d: snap.scene2d,
       scene3d: snap.scene3d,
+      view: {
+        ...s.view,
+        showAxes: needsCoords,
+        showGrid: needsCoords,
+        showOxyPlane3D: false,
+      },
       selection: [],
       pendingIds: [],
       activeTool2D: 'select',
@@ -262,7 +272,7 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
       activePresetId: preset.id,
       cameraRequest: { preset: 'oxyz', nonce: Date.now() },
       toast: { text: `Đã mở mẫu: ${preset.title}`, tone: 'success' },
-    });
+    }));
   },
 
   clearScene: (target = 'all') => {

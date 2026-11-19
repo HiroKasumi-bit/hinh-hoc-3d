@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  Axis3D,
   BookOpen,
   Box,
   Camera,
@@ -43,6 +44,12 @@ export const TopBar: React.FC = () => {
   const [presetModalOpen, setPresetModalOpen] = useState(false);
   const [gradeTab, setGradeTab] = useState<10 | 11 | 12>(11);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const onOpenPresets = () => setPresetModalOpen(true);
+    window.addEventListener('hinhhocviet-open-presets', onOpenPresets);
+    return () => window.removeEventListener('hinhhocviet-open-presets', onOpenPresets);
+  }, []);
 
   useEffect(() => {
     if (!presetModalOpen) return;
@@ -202,10 +209,20 @@ export const TopBar: React.FC = () => {
 
           <button
             type="button"
-            title="Bật/tắt lưới & trục tọa độ"
-            onClick={() => updateView({ showGrid: !view.showGrid, showAxes: !view.showGrid || view.showAxes })}
+            title={view.showAxes ? 'Tắt trục tọa độ Oxy / Oxyz' : 'Bật trục tọa độ Oxy / Oxyz'}
+            onClick={() => updateView({ showAxes: !view.showAxes })}
             className={`rounded-md p-1.5 transition-colors ${
-              view.showGrid ? 'text-[#1D5CE5]' : 'opacity-50'
+              view.showAxes ? 'bg-[#1D5CE5]/12 text-[#1D5CE5]' : 'opacity-50'
+            } ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
+          >
+            <Axis3D className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            title={view.showGrid ? 'Tắt lưới ô vuông' : 'Bật lưới ô vuông'}
+            onClick={() => updateView({ showGrid: !view.showGrid })}
+            className={`rounded-md p-1.5 transition-colors ${
+              view.showGrid ? 'bg-[#1D5CE5]/12 text-[#1D5CE5]' : 'opacity-50'
             } ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
           >
             <Grid className="h-4 w-4" />

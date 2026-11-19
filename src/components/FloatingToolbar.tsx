@@ -35,6 +35,13 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
   const [builderTab, setBuilderTab] = useState<'poly' | 'round' | 'oxyz'>('poly');
 
   useEffect(() => {
+    if (domain !== '3d') return;
+    const onOpenBuilder = () => setBuilderOpen(true);
+    window.addEventListener('hinhhocviet-open-builder', onOpenBuilder);
+    return () => window.removeEventListener('hinhhocviet-open-builder', onOpenBuilder);
+  }, [domain]);
+
+  useEffect(() => {
     if (!builderOpen) return;
     const onEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setBuilderOpen(false);

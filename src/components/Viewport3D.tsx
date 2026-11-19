@@ -3,7 +3,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { GizmoHelper, GizmoViewport, Html, Line, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { Eye, Layers, Sparkles } from 'lucide-react';
+import { Axis3D, Eye, Layers, Sparkles } from 'lucide-react';
 import { useGeometryStore } from '../store/useGeometryStore';
 import { compileExpression } from '../math/parser';
 import { formatNum } from '../math/geometry2d';
@@ -1280,13 +1280,15 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
         );
       })}
 
-      <GizmoHelper alignment="bottom-right" margin={[62, 62]}>
-        <GizmoViewport
-          axisColors={['#16A34A', '#2563EB', '#DC2626']}
-          labels={['y', 'z', 'x']}
-          labelColor={isDark ? '#F8FAFC' : '#0F1B2D'}
-        />
-      </GizmoHelper>
+      {view.showAxes && (
+        <GizmoHelper alignment="bottom-right" margin={[62, 62]}>
+          <GizmoViewport
+            axisColors={['#16A34A', '#2563EB', '#DC2626']}
+            labels={['y', 'z', 'x']}
+            labelColor={isDark ? '#F8FAFC' : '#0F1B2D'}
+          />
+        </GizmoHelper>
+      )}
     </>
   );
 };
@@ -1345,6 +1347,21 @@ export const Viewport3D: React.FC = () => {
             isDark ? 'border-slate-700 bg-slate-900/92 text-slate-200' : 'border-[#DCE3EC] bg-white/95 text-[#0F1B2D]'
           }`}
         >
+          <button
+            type="button"
+            onClick={() => updateView({ showAxes: !view.showAxes })}
+            className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-left font-medium transition-colors ${
+              view.showAxes
+                ? 'bg-[#1D5CE5]/12 text-[#1D5CE5]'
+                : isDark
+                ? 'text-slate-400 hover:bg-slate-800'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Axis3D className="h-3.5 w-3.5" />
+            <span>Trục tọa độ Oxyz</span>
+          </button>
+
           <button
             type="button"
             onClick={() => updateView({ autoDashedHiddenEdges: !view.autoDashedHiddenEdges })}
