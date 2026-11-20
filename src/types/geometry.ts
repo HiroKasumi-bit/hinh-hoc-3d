@@ -17,15 +17,14 @@ export type Tool2D =
   | 'angle'
   | 'distance';
 
+export type Segment3DSolidMode = 'box' | 'tetrahedron' | 'pyramid4' | 'segmentOnly';
+
 export type Tool3D =
   | 'select'
   | 'point'
   | 'segment'
   | 'line'
   | 'vector'
-  | 'tetrahedron3d'
-  | 'pyramid4_3d'
-  | 'box3d'
   | 'plane3p'
   | 'midpoint'
   | 'ratio'

@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowUpRight,
-  Box,
   CheckSquare,
   Circle,
   Compass,
@@ -101,14 +100,11 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
   const tools3D: Array<{ id: Tool3D; label: string; short: string; shortcutId: ShortcutActionId; icon: React.ReactNode }> = [
     { id: 'select', label: 'Chọn / Xoay 3D', short: 'Chọn', shortcutId: 'tool_select', icon: <MousePointer2 className="h-3.5 w-3.5" /> },
     { id: 'point', label: 'Chấm điểm (nhấn giữ kéo độ cao z)', short: 'Điểm', shortcutId: 'tool_point', icon: <Dot className="h-4 w-4" /> },
-    { id: 'segment', label: 'Nối đoạn thẳng', short: 'Đoạn', shortcutId: 'tool_segment', icon: <Minus className="h-3.5 w-3.5" /> },
-    { id: 'tetrahedron3d', label: 'Chóp tứ diện S.ABC (chọn 3 điểm)', short: 'Tứ diện', shortcutId: 'tool_tetrahedron3d', icon: <Triangle className="h-3.5 w-3.5" /> },
-    { id: 'pyramid4_3d', label: 'Chóp tứ giác S.ABCD (2 điểm đáy + điểm thứ 3)', short: 'Chóp 4', shortcutId: 'tool_pyramid4_3d', icon: <Hexagon className="h-3.5 w-3.5" /> },
-    { id: 'box3d', label: 'Hình lập phương / Khối hộp (2 điểm cạnh đáy)', short: 'Khối hộp', shortcutId: 'tool_box3d', icon: <Box className="h-3.5 w-3.5" /> },
+    { id: 'segment', label: 'Nối đoạn thẳng (chấm tiếp điểm thứ 3 để tự dựng Hình hộp / Chóp 3D)', short: 'Đoạn', shortcutId: 'tool_segment', icon: <Minus className="h-3.5 w-3.5" /> },
     { id: 'line', label: 'Đường thẳng Oxyz', short: 'Đường', shortcutId: 'tool_line', icon: <MoveDiagonal className="h-3.5 w-3.5" /> },
     { id: 'vector', label: 'Vectơ 3D', short: 'Vectơ', shortcutId: 'tool_vector', icon: <ArrowUpRight className="h-3.5 w-3.5" /> },
     { id: 'plane3p', label: 'Mặt phẳng qua 3 điểm', short: 'Mặt phẳng', shortcutId: 'tool_plane_or_polygon', icon: <Layers className="h-3.5 w-3.5" /> },
-    { id: 'midpoint', label: 'Trung điểm', short: 'T.điểm', shortcutId: 'tool_midpoint', icon: <Dot className="h-3.5 w-3.5" /> },
+    { id: 'midpoint', label: 'Trung điểm', short: 'T.điểm', shortcutId: 'tool_midpoint', icon: <Triangle className="h-3.5 w-3.5" /> },
     { id: 'crossSection', label: 'Cắt thiết diện (3 điểm)', short: 'Thiết diện', shortcutId: 'tool_section_or_perp', icon: <Scissors className="h-3.5 w-3.5" /> },
     { id: 'distance', label: 'Đo khoảng cách', short: 'K.cách', shortcutId: 'tool_distance', icon: <Ruler className="h-3.5 w-3.5" /> },
     { id: 'angle', label: 'Đo góc không gian', short: 'Góc', shortcutId: 'tool_angle', icon: <Compass className="h-3.5 w-3.5" /> },
@@ -153,12 +149,7 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
                 {!compact && (
                   <span
                     className={
-                      tool.id === 'point' ||
-                      tool.id === 'select' ||
-                      tool.id === 'segment' ||
-                      tool.id === 'tetrahedron3d' ||
-                      tool.id === 'pyramid4_3d' ||
-                      tool.id === 'box3d'
+                      tool.id === 'point' || tool.id === 'select' || tool.id === 'segment'
                         ? 'inline'
                         : 'hidden xl:inline'
                     }

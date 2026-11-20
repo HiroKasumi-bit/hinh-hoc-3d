@@ -4,7 +4,7 @@ import { GizmoHelper, GizmoViewport, Html, Line, OrbitControls } from '@react-th
 import * as THREE from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { Axis3D, Eye, Layers, SlidersHorizontal, Sparkles, X } from 'lucide-react';
-import { useGeometryStore } from '../store/useGeometryStore';
+import { useGeometryStore, type Construction3DDragTarget } from '../store/useGeometryStore';
 import { useViewportProfile } from '../hooks/useViewportProfile';
 import { compileExpression } from '../math/parser';
 import { formatNum } from '../math/geometry2d';
@@ -39,6 +39,7 @@ import type {
   CrossSection3D,
   Plane3D,
   Polyhedron3D,
+  Segment3DSolidMode,
   Solid3D,
   Surface3D,
   Tool3D,
@@ -57,9 +58,12 @@ const Label3D: React.FC<{ position: [number, number, number]; children: React.Re
 
 interface ZDragSession {
   pointId: string;
+  targetPoints: Array<{ id: string; baseZ: number }>;
   baseX: number;
   baseY: number;
   baseZ: number;
+  floorZ: number;
+  hudLabel: 'z' | 'h';
   startClientX: number;
   startClientY: number;
   pointerId: number;
@@ -74,6 +78,8 @@ interface ZDragHud {
   x: number;
   y: number;
   z: number;
+  displayVal: number;
+  label: 'z' | 'h';
   mode: 'create' | 'adjust';
 }
 
@@ -355,7 +361,7 @@ const ZElevationGuide: React.FC<{ hud: ZDragHud; isDark: boolean }> = ({ hud, is
               : 'border-amber-500 bg-amber-50/98 text-amber-900'
           }`}
         >
-          ↕ z = {formatNum(z, 2)}
+          ↕ {hud.label} = {formatNum(hud.displayVal, 2)}
         </div>
       </Label3D>
     </group>
@@ -957,12 +963,14 @@ function computeSquareBase3D(p1: Vec3, p2: Vec3): { p3: Vec3; p4: Vec3; side: nu
 
 const ConstructionPreview3D: React.FC<{
   activeTool3D: Tool3D;
+  segment3DMode: Segment3DSolidMode;
   pendingIds: string[];
   ptMap: Map<string, Vec3>;
   hoveredPointId: string | null;
   hoverGroundPos: Vec3 | null;
+  snapToGrid: boolean;
   isDark: boolean;
-}> = ({ activeTool3D, pendingIds, ptMap, hoveredPointId, hoverGroundPos, isDark }) => {
+}> = ({ activeTool3D, segment3DMode, pendingIds, ptMap, hoveredPointId, hoverGroundPos, snapToGrid, isDark }) => {
   if (activeTool3D === 'select') return null;
 
   const targetPos: Vec3 | null = hoveredPointId ? ptMap.get(hoveredPointId) ?? hoverGroundPos : hoverGroundPos;
@@ -983,9 +991,189 @@ const ConstructionPreview3D: React.FC<{
   const renderToolPreview = () => {
     if (!targetPos || pendingPts.length === 0) return null;
 
-    // 1. 2-point linear tools: segment, line, vector, midpoint, ratio, distance
+    // 1. Integrated Smart Segment Tool:
+    //    - Step 2 (1 point chosen): dashed segment rubber-band with live length
+    //    - Step 3 (2 points chosen, segment AB connected!): live 3D ghost Box / Tetrahedron / Pyramid4!
+    if (activeTool3D === 'segment') {
+      if (pendingPts.length === 1) {
+        const p1 = pendingPts[0];
+        const d = dist3(p1, targetPos);
+        if (d < 0.04) return null;
+        const mid: Vec3 = [(p1[0] + targetPos[0]) / 2, (p1[1] + targetPos[1]) / 2, (p1[2] + targetPos[2]) / 2 + 0.22];
+        return (
+          <group>
+            <Line
+              points={[mathToScene(p1), mathToScene(targetPos)]}
+              color="#0284C7"
+              lineWidth={2.8}
+              dashed
+              dashSize={0.18}
+              gapSize={0.11}
+            />
+            <Label3D position={mathToScene(mid)}>
+              <div
+                className={`font-math pointer-events-none select-none whitespace-nowrap rounded border px-1.5 py-0.5 text-[10.5px] font-bold shadow-xs ${
+                  isDark ? 'border-sky-400 bg-slate-900/95 text-sky-300' : 'border-sky-500 bg-sky-50/95 text-sky-900'
+                }`}
+              >
+                {formatNum(d, 2)}
+              </div>
+            </Label3D>
+          </group>
+        );
+      }
+
+      if (pendingPts.length >= 2) {
+        const [p1, p2] = pendingPts;
+
+        if (segment3DMode === 'box') {
+          const u = sub3(p2, p1);
+          const sideA = Math.max(0.5, len3(u));
+          const perpRaw: Vec3 = [-u[1], u[0], 0];
+          const unitV: Vec3 = len3(perpRaw) > 1e-4 ? normalize3(perpRaw) : [0, 1, 0];
+
+          let cPos: Vec3;
+          let dPos: Vec3;
+          let h: number;
+          let sideB: number;
+
+          if (hoveredPointId && !pendingIds.includes(hoveredPointId)) {
+            if (Math.abs(targetPos[2] - p1[2]) >= 0.25) {
+              const sq = computeSquareBase3D(p1, p2);
+              cPos = sq.p3;
+              dPos = sq.p4;
+              sideB = sq.side;
+              h = Math.abs(targetPos[2] - p1[2]);
+            } else if (dist3(targetPos, p2) <= dist3(targetPos, p1)) {
+              cPos = targetPos;
+              dPos = [p1[0] + (targetPos[0] - p2[0]), p1[1] + (targetPos[1] - p2[1]), p1[2]];
+              sideB = Math.max(0.5, dist3(p2, cPos));
+              h = Math.max(1.5, Math.round(((sideA + sideB) / 2) * 2) / 2);
+            } else {
+              dPos = targetPos;
+              cPos = [p2[0] + (targetPos[0] - p1[0]), p2[1] + (targetPos[1] - p1[1]), p2[2]];
+              sideB = Math.max(0.5, dist3(p1, dPos));
+              h = Math.max(1.5, Math.round(((sideA + sideB) / 2) * 2) / 2);
+            }
+          } else {
+            const dx = targetPos[0] - p2[0];
+            const dy = targetPos[1] - p2[1];
+            const bRaw = dx * unitV[0] + dy * unitV[1];
+            const bSign = bRaw >= 0 ? 1 : -1;
+            const bMag =
+              Math.abs(bRaw) < 0.45
+                ? Math.max(1.5, sideA)
+                : snapToGrid
+                ? Math.round(Math.abs(bRaw) * 2) / 2
+                : Number(Math.abs(bRaw).toFixed(2));
+            const bSigned = bSign * bMag;
+            sideB = bMag;
+            cPos = [p2[0] + unitV[0] * bSigned, p2[1] + unitV[1] * bSigned, p2[2]];
+            dPos = [p1[0] + unitV[0] * bSigned, p1[1] + unitV[1] * bSigned, p1[2]];
+            h = Math.max(1.5, Math.round(((sideA + sideB) / 2) * 2) / 2);
+          }
+
+          const p1Top: Vec3 = [p1[0], p1[1], p1[2] + h];
+          const p2Top: Vec3 = [p2[0], p2[1], p2[2] + h];
+          const cTop: Vec3 = [cPos[0], cPos[1], cPos[2] + h];
+          const dTop: Vec3 = [dPos[0], dPos[1], dPos[2] + h];
+          const topCenter = centroid3([p1Top, p2Top, cTop, dTop]);
+
+          return (
+            <group>
+              <Line
+                points={[mathToScene(p1), mathToScene(p2), mathToScene(cPos), mathToScene(dPos), mathToScene(p1)]}
+                color="#7C3AED"
+                lineWidth={2.8}
+              />
+              <Line
+                points={[mathToScene(p1Top), mathToScene(p2Top), mathToScene(cTop), mathToScene(dTop), mathToScene(p1Top)]}
+                color="#7C3AED"
+                lineWidth={2.2}
+                dashed
+                dashSize={0.18}
+                gapSize={0.11}
+              />
+              <Line points={[mathToScene(p1), mathToScene(p1Top)]} color="#7C3AED" lineWidth={1.9} dashed dashSize={0.16} gapSize={0.1} />
+              <Line points={[mathToScene(p2), mathToScene(p2Top)]} color="#7C3AED" lineWidth={1.9} dashed dashSize={0.16} gapSize={0.1} />
+              <Line points={[mathToScene(cPos), mathToScene(cTop)]} color="#7C3AED" lineWidth={1.9} dashed dashSize={0.16} gapSize={0.1} />
+              <Line points={[mathToScene(dPos), mathToScene(dTop)]} color="#7C3AED" lineWidth={1.9} dashed dashSize={0.16} gapSize={0.1} />
+              <Label3D position={mathToScene([topCenter[0], topCenter[1], topCenter[2] + 0.25])}>
+                <div
+                  className={`font-math pointer-events-none select-none whitespace-nowrap rounded border px-1.5 py-0.5 text-[10.5px] font-bold shadow-xs ${
+                    isDark
+                      ? 'border-violet-400 bg-slate-900/95 text-violet-300'
+                      : 'border-violet-500 bg-violet-50/95 text-violet-900'
+                  }`}
+                >
+                  Hình hộp {formatNum(sideA, 1)} × {formatNum(sideB, 1)} × {formatNum(h, 1)}
+                </div>
+              </Label3D>
+            </group>
+          );
+        }
+
+        if (segment3DMode === 'tetrahedron') {
+          const p3 = targetPos;
+          let n = cross3(sub3(p2, p1), sub3(p3, p1));
+          if (n[2] < 0) n = scale3(n, -1);
+          const unitN = len3(n) > 1e-4 ? normalize3(n) : ([0, 0, 1] as Vec3);
+          const avgEdge = (dist3(p1, p2) + dist3(p2, p3) + dist3(p3, p1)) / 3;
+          const h = Math.max(2, Math.round(avgEdge * Math.sqrt(2 / 3) * 2) / 2);
+          const g = centroid3([p1, p2, p3]);
+          const sPos: Vec3 = [g[0] + unitN[0] * h, g[1] + unitN[1] * h, Math.max(1.5, g[2] + unitN[2] * h)];
+          return (
+            <group>
+              <Line points={[mathToScene(p1), mathToScene(p2), mathToScene(p3), mathToScene(p1)]} color="#0E9F6E" lineWidth={2.8} />
+              <Line points={[mathToScene(sPos), mathToScene(p1)]} color="#E06D1F" lineWidth={2.1} dashed dashSize={0.18} gapSize={0.11} />
+              <Line points={[mathToScene(sPos), mathToScene(p2)]} color="#E06D1F" lineWidth={2.1} dashed dashSize={0.18} gapSize={0.11} />
+              <Line points={[mathToScene(sPos), mathToScene(p3)]} color="#E06D1F" lineWidth={2.1} dashed dashSize={0.18} gapSize={0.11} />
+              <mesh position={mathToScene(sPos)}>
+                <sphereGeometry args={[0.11, 14, 14]} />
+                <meshBasicMaterial color="#E06D1F" transparent opacity={0.85} />
+              </mesh>
+              <Label3D position={mathToScene([sPos[0], sPos[1], sPos[2] + 0.28])}>
+                <span className="pointer-events-none select-none rounded bg-[#E06D1F] px-1.5 py-0.5 text-[10px] font-bold text-white shadow-xs">
+                  Chóp tứ diện S
+                </span>
+              </Label3D>
+            </group>
+          );
+        }
+
+        if (segment3DMode === 'pyramid4') {
+          const { p3, p4, side } = computeSquareBase3D(p1, p2);
+          const defaultH = Math.max(2.5, Math.round(side * 1.15 * 2) / 2);
+          const sPos: Vec3 = [
+            targetPos[0],
+            targetPos[1],
+            Math.abs(targetPos[2] - p1[2]) < 0.25 ? p1[2] + defaultH : targetPos[2],
+          ];
+          return (
+            <group>
+              <Line points={[mathToScene(p1), mathToScene(p2), mathToScene(p3), mathToScene(p4), mathToScene(p1)]} color="#1D5CE5" lineWidth={2.8} />
+              <Line points={[mathToScene(sPos), mathToScene(p1)]} color="#E06D1F" lineWidth={2.2} dashed dashSize={0.18} gapSize={0.11} />
+              <Line points={[mathToScene(sPos), mathToScene(p2)]} color="#E06D1F" lineWidth={2.2} dashed dashSize={0.18} gapSize={0.11} />
+              <Line points={[mathToScene(sPos), mathToScene(p3)]} color="#E06D1F" lineWidth={2.2} dashed dashSize={0.18} gapSize={0.11} />
+              <Line points={[mathToScene(sPos), mathToScene(p4)]} color="#E06D1F" lineWidth={2.2} dashed dashSize={0.18} gapSize={0.11} />
+              <mesh position={mathToScene(sPos)}>
+                <sphereGeometry args={[0.12, 14, 14]} />
+                <meshBasicMaterial color="#E06D1F" />
+              </mesh>
+              <Label3D position={mathToScene([sPos[0], sPos[1], sPos[2] + 0.3])}>
+                <span className="pointer-events-none select-none rounded bg-[#E06D1F] px-1.5 py-0.5 text-[10px] font-bold text-white shadow-xs">
+                  Đỉnh S
+                </span>
+              </Label3D>
+            </group>
+          );
+        }
+      }
+      return null;
+    }
+
+    // 2. Other 2-point linear tools: line, vector, midpoint, ratio, distance
     if (
-      activeTool3D === 'segment' ||
       activeTool3D === 'line' ||
       activeTool3D === 'vector' ||
       activeTool3D === 'midpoint' ||
@@ -1019,7 +1207,7 @@ const ConstructionPreview3D: React.FC<{
       );
     }
 
-    // 2. 3-point plane / cross-section / angle tools
+    // 3. 3-point plane / cross-section / angle tools
     if (activeTool3D === 'plane3p' || activeTool3D === 'crossSection' || activeTool3D === 'angle') {
       if (pendingPts.length === 1) {
         return (
@@ -1046,157 +1234,6 @@ const ConstructionPreview3D: React.FC<{
           />
         );
       }
-    }
-
-    // 3. Tetrahedron 3D (S.ABC): 3 clicks A -> B -> C
-    if (activeTool3D === 'tetrahedron3d') {
-      if (pendingPts.length === 1) {
-        const p1 = pendingPts[0];
-        if (dist3(p1, targetPos) < 0.05) return null;
-        return (
-          <Line
-            points={[mathToScene(p1), mathToScene(targetPos)]}
-            color="#0E9F6E"
-            lineWidth={2.8}
-            dashed
-            dashSize={0.18}
-            gapSize={0.11}
-          />
-        );
-      }
-      if (pendingPts.length >= 2) {
-        const [p1, p2] = pendingPts;
-        const p3 = targetPos;
-        let n = cross3(sub3(p2, p1), sub3(p3, p1));
-        if (n[2] < 0) n = scale3(n, -1);
-        const unitN = len3(n) > 1e-4 ? normalize3(n) : ([0, 0, 1] as Vec3);
-        const avgEdge = (dist3(p1, p2) + dist3(p2, p3) + dist3(p3, p1)) / 3;
-        const h = Math.max(2, Math.round(avgEdge * Math.sqrt(2 / 3) * 2) / 2);
-        const g = centroid3([p1, p2, p3]);
-        const sPos: Vec3 = [g[0] + unitN[0] * h, g[1] + unitN[1] * h, Math.max(1.5, g[2] + unitN[2] * h)];
-        return (
-          <group>
-            {/* Base triangle A-B-C */}
-            <Line
-              points={[mathToScene(p1), mathToScene(p2), mathToScene(p3), mathToScene(p1)]}
-              color="#0E9F6E"
-              lineWidth={2.8}
-            />
-            {/* Ghost lateral edges S-A, S-B, S-C */}
-            <Line points={[mathToScene(sPos), mathToScene(p1)]} color="#E06D1F" lineWidth={2.1} dashed dashSize={0.18} gapSize={0.11} />
-            <Line points={[mathToScene(sPos), mathToScene(p2)]} color="#E06D1F" lineWidth={2.1} dashed dashSize={0.18} gapSize={0.11} />
-            <Line points={[mathToScene(sPos), mathToScene(p3)]} color="#E06D1F" lineWidth={2.1} dashed dashSize={0.18} gapSize={0.11} />
-            <mesh position={mathToScene(sPos)}>
-              <sphereGeometry args={[0.11, 14, 14]} />
-              <meshBasicMaterial color="#E06D1F" transparent opacity={0.85} />
-            </mesh>
-            <Label3D position={mathToScene([sPos[0], sPos[1], sPos[2] + 0.28])}>
-              <span className="pointer-events-none select-none rounded bg-[#E06D1F] px-1.5 py-0.5 text-[10px] font-bold text-white shadow-xs">
-                S
-              </span>
-            </Label3D>
-          </group>
-        );
-      }
-    }
-
-    // 4. Square Pyramid 3D (S.ABCD): 2 clicks for base A->B + 3rd click for apex S
-    if (activeTool3D === 'pyramid4_3d') {
-      if (pendingPts.length === 1) {
-        const p1 = pendingPts[0];
-        const p2 = targetPos;
-        if (dist3(p1, p2) < 0.08) return null;
-        const { p3, p4, side } = computeSquareBase3D(p1, p2);
-        const center = centroid3([p1, p2, p3, p4]);
-        const sPos: Vec3 = [center[0], center[1], p1[2] + Math.max(2.5, side * 1.15)];
-        return (
-          <group>
-            <Line
-              points={[mathToScene(p1), mathToScene(p2), mathToScene(p3), mathToScene(p4), mathToScene(p1)]}
-              color="#1D5CE5"
-              lineWidth={2.6}
-            />
-            <Line points={[mathToScene(sPos), mathToScene(p1)]} color="#E06D1F" lineWidth={1.8} dashed dashSize={0.18} gapSize={0.12} />
-            <Line points={[mathToScene(sPos), mathToScene(p2)]} color="#E06D1F" lineWidth={1.8} dashed dashSize={0.18} gapSize={0.12} />
-            <Line points={[mathToScene(sPos), mathToScene(p3)]} color="#E06D1F" lineWidth={1.8} dashed dashSize={0.18} gapSize={0.12} />
-            <Line points={[mathToScene(sPos), mathToScene(p4)]} color="#E06D1F" lineWidth={1.8} dashed dashSize={0.18} gapSize={0.12} />
-          </group>
-        );
-      }
-      if (pendingPts.length >= 2) {
-        const [p1, p2] = pendingPts;
-        const { p3, p4, side } = computeSquareBase3D(p1, p2);
-        const defaultH = Math.max(2.5, Math.round(side * 1.15 * 2) / 2);
-        const sPos: Vec3 = [
-          targetPos[0],
-          targetPos[1],
-          Math.abs(targetPos[2] - p1[2]) < 0.25 ? p1[2] + defaultH : targetPos[2],
-        ];
-        return (
-          <group>
-            <Line
-              points={[mathToScene(p1), mathToScene(p2), mathToScene(p3), mathToScene(p4), mathToScene(p1)]}
-              color="#1D5CE5"
-              lineWidth={2.8}
-            />
-            <mesh position={mathToScene(p3)}>
-              <sphereGeometry args={[0.085, 12, 12]} />
-              <meshBasicMaterial color="#1D5CE5" />
-            </mesh>
-            <mesh position={mathToScene(p4)}>
-              <sphereGeometry args={[0.085, 12, 12]} />
-              <meshBasicMaterial color="#1D5CE5" />
-            </mesh>
-            <Line points={[mathToScene(sPos), mathToScene(p1)]} color="#E06D1F" lineWidth={2.2} dashed dashSize={0.18} gapSize={0.11} />
-            <Line points={[mathToScene(sPos), mathToScene(p2)]} color="#E06D1F" lineWidth={2.2} dashed dashSize={0.18} gapSize={0.11} />
-            <Line points={[mathToScene(sPos), mathToScene(p3)]} color="#E06D1F" lineWidth={2.2} dashed dashSize={0.18} gapSize={0.11} />
-            <Line points={[mathToScene(sPos), mathToScene(p4)]} color="#E06D1F" lineWidth={2.2} dashed dashSize={0.18} gapSize={0.11} />
-            <mesh position={mathToScene(sPos)}>
-              <sphereGeometry args={[0.12, 14, 14]} />
-              <meshBasicMaterial color="#E06D1F" />
-            </mesh>
-            <Label3D position={mathToScene([sPos[0], sPos[1], sPos[2] + 0.3])}>
-              <span className="pointer-events-none select-none rounded bg-[#E06D1F] px-1.5 py-0.5 text-[10px] font-bold text-white shadow-xs">
-                Đỉnh S
-              </span>
-            </Label3D>
-          </group>
-        );
-      }
-    }
-
-    // 5. Cube / Box 3D (ABCD.A'B'C'D'): 2 clicks A -> B
-    if (activeTool3D === 'box3d' && pendingPts.length === 1) {
-      const p1 = pendingPts[0];
-      const p2 = targetPos;
-      if (dist3(p1, p2) < 0.08) return null;
-      const { p3, p4, side } = computeSquareBase3D(p1, p2);
-      const h = Math.max(1.5, Math.round(side * 2) / 2);
-      const p1Top: Vec3 = [p1[0], p1[1], p1[2] + h];
-      const p2Top: Vec3 = [p2[0], p2[1], p2[2] + h];
-      const p3Top: Vec3 = [p3[0], p3[1], p3[2] + h];
-      const p4Top: Vec3 = [p4[0], p4[1], p4[2] + h];
-      return (
-        <group>
-          <Line
-            points={[mathToScene(p1), mathToScene(p2), mathToScene(p3), mathToScene(p4), mathToScene(p1)]}
-            color="#7C3AED"
-            lineWidth={2.6}
-          />
-          <Line
-            points={[mathToScene(p1Top), mathToScene(p2Top), mathToScene(p3Top), mathToScene(p4Top), mathToScene(p1Top)]}
-            color="#7C3AED"
-            lineWidth={2}
-            dashed
-            dashSize={0.18}
-            gapSize={0.11}
-          />
-          <Line points={[mathToScene(p1), mathToScene(p1Top)]} color="#7C3AED" lineWidth={1.8} dashed dashSize={0.16} gapSize={0.1} />
-          <Line points={[mathToScene(p2), mathToScene(p2Top)]} color="#7C3AED" lineWidth={1.8} dashed dashSize={0.16} gapSize={0.1} />
-          <Line points={[mathToScene(p3), mathToScene(p3Top)]} color="#7C3AED" lineWidth={1.8} dashed dashSize={0.16} gapSize={0.1} />
-          <Line points={[mathToScene(p4), mathToScene(p4Top)]} color="#7C3AED" lineWidth={1.8} dashed dashSize={0.16} gapSize={0.1} />
-        </group>
-      );
     }
 
     return null;
@@ -1229,11 +1266,13 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
   const selection = useGeometryStore((s) => s.selection);
   const pendingIds = useGeometryStore((s) => s.pendingIds);
   const activeTool3D = useGeometryStore((s) => s.activeTool3D);
+  const segment3DMode = useGeometryStore((s) => s.segment3DMode);
   const handlePoint3DClick = useGeometryStore((s) => s.handlePoint3DClick);
   const handleGround3DConstructionClick = useGeometryStore((s) => s.handleGround3DConstructionClick);
   const selectItem = useGeometryStore((s) => s.selectItem);
   const addPoint3D = useGeometryStore((s) => s.addPoint3D);
   const updatePoint3DCoords = useGeometryStore((s) => s.updatePoint3DCoords);
+  const updatePoints3DZBulk = useGeometryStore((s) => s.updatePoints3DZBulk);
   const pushHistory = useGeometryStore((s) => s.pushHistory);
 
   const isDark = view.theme === 'dark';
@@ -1264,7 +1303,7 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
     [scene3d.points, scene3d.planes, sliderScope]
   );
 
-  // Window-level pointermove / pointerup for silky 1:1 vertical Z elevation on desktop & mobile!
+  // Window-level pointermove / pointerup for silky 1:1 vertical Z/height elevation on desktop & mobile!
   useEffect(() => {
     const computeUnitsPerPx = (baseX: number, baseY: number, baseZ: number) => {
       const pScene = new THREE.Vector3(...mathToScene([baseX, baseY, baseZ]));
@@ -1281,7 +1320,7 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
       const dx = e.clientX - session.startClientX;
       const dy = session.startClientY - e.clientY; // positive when dragging UP
 
-      // If existing point is being dragged vertically before hold timer finishes, activate Z-drag right away!
+      // Activate Z-drag right away if dragging vertically!
       if (!session.activated && Math.abs(dy) >= 10 && Math.abs(dy) >= Math.abs(dx) * 1.1) {
         if (session.timerId !== null) {
           window.clearTimeout(session.timerId);
@@ -1295,7 +1334,15 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
         if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
           try { navigator.vibrate(16); } catch { /* ignore */ }
         }
-        setZHud({ pointId: session.pointId, x: session.baseX, y: session.baseY, z: session.baseZ, mode: session.mode });
+        setZHud({
+          pointId: session.pointId,
+          x: session.baseX,
+          y: session.baseY,
+          z: session.baseZ,
+          displayVal: session.hudLabel === 'h' ? Math.abs(session.baseZ - session.floorZ) : session.baseZ,
+          label: session.hudLabel,
+          mode: session.mode,
+        });
       }
 
       if (!session.activated) return;
@@ -1303,11 +1350,42 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
       if (Math.abs(dy) >= 4 || session.moved) {
         session.moved = true;
         const unitsPerPx = computeUnitsPerPx(session.baseX, session.baseY, session.baseZ);
-        const rawZ = Math.max(-12, Math.min(12, session.baseZ + dy * unitsPerPx));
         const snap = useGeometryStore.getState().view.snapToGrid;
-        const nextZ = snap ? Math.round(rawZ * 2) / 2 : Number(rawZ.toFixed(2));
-        updatePoint3DCoords(session.pointId, [session.baseX, session.baseY, nextZ]);
-        setZHud({ pointId: session.pointId, x: session.baseX, y: session.baseY, z: nextZ, mode: session.mode });
+        const deltaRaw = dy * unitsPerPx;
+        const delta = snap ? Math.round(deltaRaw * 2) / 2 : Number(deltaRaw.toFixed(2));
+        const nextAnchorZ = Math.max(-12, Math.min(12, Number((session.baseZ + delta).toFixed(2))));
+
+        if (session.targetPoints.length > 1) {
+          // Elevate entire top face of Box 3D in unison while keeping min height >= 0.5!
+          const clampedZ = Math.max(session.floorZ + 0.5, nextAnchorZ);
+          const actualDelta = clampedZ - session.baseZ;
+          updatePoints3DZBulk(
+            session.targetPoints.map((tp) => ({
+              id: tp.id,
+              z: Number((tp.baseZ + actualDelta).toFixed(2)),
+            }))
+          );
+          setZHud({
+            pointId: session.pointId,
+            x: session.baseX,
+            y: session.baseY,
+            z: clampedZ,
+            displayVal: Number(Math.abs(clampedZ - session.floorZ).toFixed(2)),
+            label: 'h',
+            mode: session.mode,
+          });
+        } else {
+          updatePoint3DCoords(session.pointId, [session.baseX, session.baseY, nextAnchorZ]);
+          setZHud({
+            pointId: session.pointId,
+            x: session.baseX,
+            y: session.baseY,
+            z: nextAnchorZ,
+            displayVal: nextAnchorZ,
+            label: 'z',
+            mode: session.mode,
+          });
+        }
       }
     };
 
@@ -1351,19 +1429,34 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
       window.removeEventListener('pointerup', finishDrag);
       window.removeEventListener('pointercancel', finishDrag);
     };
-  }, [camera, size.height, controlsRef, updatePoint3DCoords, pushHistory, handlePoint3DClick]);
+  }, [camera, size.height, controlsRef, updatePoint3DCoords, updatePoints3DZBulk, pushHistory, handlePoint3DClick]);
 
-  // Attach optional hold-and-drag Z elevation right after creating a point or pyramid apex S!
-  const attachCreateZDrag = (pointId: string, nativeEvent: PointerEvent, immediateActivate: boolean) => {
-    const pt = useGeometryStore.getState().scene3d.points.find((p) => p.id === pointId);
-    if (!pt || pt.computed) return;
+  // Attach optional hold-and-drag Z / height elevation right after creating a point, apex S, or box top face!
+  const attachCreateZDrag = (
+    target: Construction3DDragTarget,
+    nativeEvent: PointerEvent,
+    immediateActivate: boolean
+  ) => {
+    const curPts = useGeometryStore.getState().scene3d.points;
+    const targetPoints: Array<{ id: string; baseZ: number }> = [];
+    for (const id of target.pointIds) {
+      const pt = curPts.find((p) => p.id === id);
+      if (pt && !pt.computed) {
+        targetPoints.push({ id: pt.id, baseZ: pt.z });
+      }
+    }
+    if (targetPoints.length === 0) return;
     if (controlsRef.current) controlsRef.current.enabled = false;
 
+    const primaryId = targetPoints[0].id;
     const session: ZDragSession = {
-      pointId,
-      baseX: pt.x,
-      baseY: pt.y,
-      baseZ: pt.z,
+      pointId: primaryId,
+      targetPoints,
+      baseX: target.anchor[0],
+      baseY: target.anchor[1],
+      baseZ: target.anchor[2],
+      floorZ: target.baseZ,
+      hudLabel: target.label,
       startClientX: nativeEvent.clientX,
       startClientY: nativeEvent.clientY,
       pointerId: nativeEvent.pointerId,
@@ -1373,13 +1466,23 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
       timerId: null,
     };
 
+    const hudInitial: ZDragHud = {
+      pointId: primaryId,
+      x: target.anchor[0],
+      y: target.anchor[1],
+      z: target.anchor[2],
+      displayVal: target.label === 'h' ? Math.abs(target.anchor[2] - target.baseZ) : target.anchor[2],
+      label: target.label,
+      mode: 'create',
+    };
+
     if (immediateActivate) {
-      setZHud({ pointId, x: pt.x, y: pt.y, z: pt.z, mode: 'create' });
+      setZHud(hudInitial);
     } else {
       session.timerId = window.setTimeout(() => {
         if (dragRef.current !== session) return;
         session.activated = true;
-        setZHud({ pointId, x: pt.x, y: pt.y, z: pt.z, mode: 'create' });
+        setZHud(hudInitial);
       }, 200);
     }
 
@@ -1418,22 +1521,22 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
     if (activeTool3D === 'point') {
       const newId = addPoint3D(x, y, 0);
       selectItem({ domain: '3d', type: 'point', id: newId }, false);
-      attachCreateZDrag(newId, e.nativeEvent, true);
+      attachCreateZDrag({ pointIds: [newId], anchor: [x, y, 0], baseZ: 0, label: 'z' }, e.nativeEvent, true);
       return;
     }
 
     // In construction tools: if pointer is near an existing point, snap magnetically to it!
     const nearId = findMagneticPointId([x, y, 0]);
     if (nearId) {
-      const apexId = handlePoint3DClick(nearId, false);
-      if (apexId) attachCreateZDrag(apexId, e.nativeEvent, false);
+      const dragTarget = handlePoint3DClick(nearId, false);
+      if (dragTarget) attachCreateZDrag(dragTarget, e.nativeEvent, false);
       return;
     }
 
     // Otherwise auto-create a vertex at (x, y, 0) and advance the active construction tool!
-    const createdOrApexId = handleGround3DConstructionClick([x, y, 0]);
-    if (createdOrApexId) {
-      attachCreateZDrag(createdOrApexId, e.nativeEvent, false);
+    const dragTarget = handleGround3DConstructionClick([x, y, 0]);
+    if (dragTarget) {
+      attachCreateZDrag(dragTarget, e.nativeEvent, false);
     }
   };
 
@@ -1461,12 +1564,12 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
           suppressClickIdRef.current = null;
         }
       }, 150);
-      const apexId = handlePoint3DClick(
+      const dragTarget = handlePoint3DClick(
         pointId,
         e.nativeEvent.shiftKey || e.nativeEvent.ctrlKey || e.nativeEvent.metaKey
       );
-      if (apexId) {
-        attachCreateZDrag(apexId, e.nativeEvent, false);
+      if (dragTarget) {
+        attachCreateZDrag(dragTarget, e.nativeEvent, false);
       }
       return;
     }
@@ -1476,9 +1579,12 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
 
     const session: ZDragSession = {
       pointId,
+      targetPoints: [{ id: pointId, baseZ: pos[2] }],
       baseX: pos[0],
       baseY: pos[1],
       baseZ: pos[2],
+      floorZ: 0,
+      hudLabel: 'z',
       startClientX: e.nativeEvent.clientX,
       startClientY: e.nativeEvent.clientY,
       pointerId: e.nativeEvent.pointerId,
@@ -1498,7 +1604,15 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
         if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
           try { navigator.vibrate(18); } catch { /* ignore */ }
         }
-        setZHud({ pointId, x: pos[0], y: pos[1], z: pos[2], mode: 'adjust' });
+        setZHud({
+          pointId,
+          x: pos[0],
+          y: pos[1],
+          z: pos[2],
+          displayVal: pos[2],
+          label: 'z',
+          mode: 'adjust',
+        });
       }, 220);
     }
 
@@ -1568,10 +1682,12 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
       {/* Live rubber-band & 3D ghost solid construction preview */}
       <ConstructionPreview3D
         activeTool3D={activeTool3D}
+        segment3DMode={segment3DMode}
         pendingIds={pendingIds}
         ptMap={ptMap}
         hoveredPointId={hoveredPointId}
         hoverGroundPos={hoverGroundPos}
+        snapToGrid={view.snapToGrid}
         isDark={isDark}
       />
 

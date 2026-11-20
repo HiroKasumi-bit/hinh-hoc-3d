@@ -114,6 +114,10 @@ export default function App() {
         return;
       }
       if (e.key === 'Escape') {
+        if (st.activeTool3D === 'segment' && st.pendingIds.length > 0) {
+          st.finishPendingSegment3D();
+          return;
+        }
         st.setTool2D('select');
         st.setTool3D('select');
         st.clearSelection();
@@ -183,18 +187,6 @@ export default function App() {
         case 'tool_angle':
           st.setTool2D('angle');
           st.setTool3D('angle');
-          break;
-        case 'tool_tetrahedron3d':
-          if (st.mode === '2d') st.setMode('3d');
-          st.setTool3D('tetrahedron3d');
-          break;
-        case 'tool_pyramid4_3d':
-          if (st.mode === '2d') st.setMode('3d');
-          st.setTool3D('pyramid4_3d');
-          break;
-        case 'tool_box3d':
-          if (st.mode === '2d') st.setMode('3d');
-          st.setTool3D('box3d');
           break;
         case 'rename_point': {
           const ptSel = st.selection.find((x) => x.type === 'point');

@@ -62,44 +62,57 @@ describe('Customizable Keyboard Shortcuts & Point Renaming', () => {
     expect(useGeometryStore.getState().scene3d.segments[0].name).toBe('AB');
   });
 
-  it('constructs 3D Tetrahedron S.ABC directly from 3 points or 3 ground clicks', () => {
+  it('integrates 3D Box creation directly inside the Segment tool on the 3rd point click', () => {
     const store = useGeometryStore.getState();
-    store.setTool3D('tetrahedron3d');
-    store.handleGround3DConstructionClick([0, 0, 0]);
-    store.handleGround3DConstructionClick([3, 0, 0]);
-    const apexId = store.handleGround3DConstructionClick([1.5, 2.5, 0]);
+    store.setTool3D('segment');
+    store.setSegment3DMode('box');
 
-    expect(apexId).toBeTruthy();
+    // Click 1 -> Point A
+    store.handleGround3DConstructionClick([0, 0, 0]);
+    expect(useGeometryStore.getState().scene3d.points.length).toBe(1);
+    expect(useGeometryStore.getState().pendingIds.length).toBe(1);
+
+    // Click 2 -> Point B + Segment AB
+    useGeometryStore.getState().handleGround3DConstructionClick([3, 0, 0]);
+    expect(useGeometryStore.getState().scene3d.points.length).toBe(2);
+    expect(useGeometryStore.getState().scene3d.segments.length).toBe(1);
+    expect(useGeometryStore.getState().pendingIds.length).toBe(2);
+
+    // Click 3 -> Automatically builds 3D Box ABCD.A'B'C'D' and removes redundant temp segment AB!
+    const dragTarget = useGeometryStore.getState().handleGround3DConstructionClick([3, 2.5, 0]);
+    expect(dragTarget).toBeTruthy();
+    expect(dragTarget?.pointIds.length).toBe(4); // 4 top vertices A', B', C', D'
     const s3 = useGeometryStore.getState().scene3d;
-    expect(s3.points.length).toBe(4); // A, B, C, S
+    expect(s3.points.length).toBe(8);
+    expect(s3.segments.length).toBe(0);
     expect(s3.polyhedra.length).toBe(1);
-    expect(s3.polyhedra[0].kind).toBe('tetrahedron');
-    expect(s3.polyhedra[0].faces.length).toBe(4);
+    expect(s3.polyhedra[0].kind).toBe('box');
+    expect(s3.polyhedra[0].faces.length).toBe(6);
   });
 
-  it('pre-fills 2 existing/connected points so the 3rd click immediately constructs a 3D Pyramid S.ABCD', () => {
+  it('supports switching Segment 3rd-point mode to Tetrahedron S.ABC or Segment-Only', () => {
     const store = useGeometryStore.getState();
-    const idA = store.addPoint3D(0, 0, 0, 'A');
-    const idB = store.addPoint3D(3, 0, 0, 'B');
-    useGeometryStore.setState({
-      selection: [
-        { domain: '3d', type: 'point', id: idA },
-        { domain: '3d', type: 'point', id: idB },
-      ],
-    });
-    store.createSegmentFromSelection('3d');
+    store.setTool3D('segment');
+    store.setSegment3DMode('tetrahedron');
 
-    // Now switch to pyramid4_3d -> should automatically pre-fill [idA, idB]
-    useGeometryStore.getState().setTool3D('pyramid4_3d');
-    expect(useGeometryStore.getState().pendingIds).toEqual([idA, idB]);
+    store.handleGround3DConstructionClick([0, 0, 0]);
+    useGeometryStore.getState().handleGround3DConstructionClick([3, 0, 0]);
+    const dragTarget = useGeometryStore.getState().handleGround3DConstructionClick([1.5, 2.5, 0]);
 
-    // 3rd click places apex S and builds the 5-face pyramid S.ABCD immediately!
-    const sId = useGeometryStore.getState().handleGround3DConstructionClick([1.5, 1.5, 3.5]);
-    expect(sId).toBeTruthy();
+    expect(dragTarget?.pointIds.length).toBe(1); // Apex S
     const s3 = useGeometryStore.getState().scene3d;
-    expect(s3.points.length).toBe(5); // A, B, C, D, S
+    expect(s3.points.length).toBe(4); // A, B, C, S
+    expect(s3.segments.length).toBe(0);
     expect(s3.polyhedra.length).toBe(1);
-    expect(s3.polyhedra[0].kind).toBe('pyramid');
-    expect(s3.polyhedra[0].faces.length).toBe(5);
+    expect(s3.polyhedra[0].kind).toBe('tetrahedron');
+
+    // Reset and test segmentOnly mode
+    useGeometryStore.getState().clearScene('all');
+    useGeometryStore.getState().setTool3D('segment');
+    useGeometryStore.getState().setSegment3DMode('segmentOnly');
+    useGeometryStore.getState().handleGround3DConstructionClick([0, 0, 0]);
+    useGeometryStore.getState().handleGround3DConstructionClick([2, 0, 0]);
+    expect(useGeometryStore.getState().pendingIds.length).toBe(0);
+    expect(useGeometryStore.getState().scene3d.segments.length).toBe(1);
   });
 });

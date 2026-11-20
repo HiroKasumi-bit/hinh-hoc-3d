@@ -10,6 +10,7 @@ import type {
   Scene2DState,
   Scene3DState,
   SceneSnapshot,
+  Segment3DSolidMode,
   SelectedItem,
   Solid3D,
   Tool2D,
@@ -79,11 +80,20 @@ export type QuickSolid3DType =
   | 'cylinder'
   | 'sphere';
 
+export interface Construction3DDragTarget {
+  pointIds: string[];
+  anchor: Vec3;
+  baseZ: number;
+  label: 'z' | 'h';
+}
+
 interface GeometryStore {
   mode: ViewMode;
   activeTool2D: Tool2D;
   activeTool3D: Tool3D;
+  segment3DMode: Segment3DSolidMode;
   pendingIds: string[];
+  pendingSegment3DId: string | null;
   selection: SelectedItem[];
   sliders: SceneSnapshot['sliders'];
   scene2d: Scene2DState;
@@ -104,6 +114,8 @@ interface GeometryStore {
   setMode: (mode: ViewMode) => void;
   setTool2D: (tool: Tool2D) => void;
   setTool3D: (tool: Tool3D) => void;
+  setSegment3DMode: (mode: Segment3DSolidMode) => void;
+  finishPendingSegment3D: () => void;
   setSidebarOpen: (open: boolean) => void;
   toggleMultiSelectMode: () => void;
   updateView: (partial: Partial<ViewSettings>) => void;
@@ -154,11 +166,18 @@ interface GeometryStore {
   // 3D Interactive Operations
   addPoint3D: (x: number, y: number, z: number, name?: string, skipHistory?: boolean) => string;
   updatePoint3DCoords: (id: string, coords: Vec3) => void;
-  handlePoint3DClick: (pointId: string, multi?: boolean) => string | null;
-  handleGround3DConstructionClick: (coords: Vec3) => string | null;
-  buildInteractiveTetrahedron3D: (p1Id: string, p2Id: string, p3Id: string) => string | null;
-  buildInteractivePyramid4_3D: (p1Id: string, p2Id: string, apexPos?: Vec3) => string | null;
-  buildInteractiveBox3D: (p1Id: string, p2Id: string, height?: number) => void;
+  updatePoints3DZBulk: (updates: Array<{ id: string; z: number }>) => void;
+  handlePoint3DClick: (pointId: string, multi?: boolean) => Construction3DDragTarget | null;
+  handleGround3DConstructionClick: (coords: Vec3) => Construction3DDragTarget | null;
+  buildInteractiveTetrahedron3D: (p1Id: string, p2Id: string, p3Id: string, removeSegmentId?: string | null) => Construction3DDragTarget | null;
+  buildInteractivePyramid4_3D: (p1Id: string, p2Id: string, apexPos?: Vec3, removeSegmentId?: string | null) => Construction3DDragTarget | null;
+  buildInteractiveBox3D: (p1Id: string, p2Id: string, height?: number, removeSegmentId?: string | null) => Construction3DDragTarget | null;
+  buildInteractiveBox3DFrom3Points: (
+    p1Id: string,
+    p2Id: string,
+    thirdTarget: { pointId?: string; coords?: Vec3 },
+    removeSegmentId?: string | null
+  ) => Construction3DDragTarget | null;
   addQuickSolid3D: (kind: QuickSolid3DType, params: { a?: number; b?: number; h?: number; r?: number; cx?: number; cy?: number; cz?: number }) => void;
   addPlane3DFromEq: (a: number, b: number, c: number, d: number, name?: string) => void;
   addLine3DFromPointDir: (point: Vec3, dir: Vec3, name?: string) => void;
@@ -173,6 +192,7 @@ interface GeometryStore {
   createTetrahedronFromSelection: () => void;
   createPyramid4FromSelection: () => void;
   createCubeFromSelection: () => void;
+  createBoxFrom3SelectedPoints: () => void;
   createCrossSectionFromSelection: () => void;
   createFootOnPlaneFromSelection: () => void;
   createReflectAcrossPlaneFromSelection: () => void;
@@ -199,7 +219,9 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
   mode: '3d',
   activeTool2D: 'select',
   activeTool3D: 'select',
+  segment3DMode: 'box',
   pendingIds: [],
+  pendingSegment3DId: null,
   selection: [],
   sliders: initialEmptySnap.sliders,
   scene2d: initialEmptySnap.scene2d,
@@ -227,49 +249,16 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
   past: [],
   future: [],
 
-  setMode: (mode) => set({ mode, pendingIds: [] }),
-  setTool2D: (tool) => set({ activeTool2D: tool, pendingIds: [] }),
-  setTool3D: (tool) => {
-    const state = get();
-    const selPts = state.selection.filter((x) => x.domain === '3d' && x.type === 'point');
-    const selSeg = state.selection.find((x) => x.domain === '3d' && x.type === 'segment');
-
-    if (tool === 'tetrahedron3d' && selPts.length === 3) {
-      state.pushHistory();
-      state.buildInteractiveTetrahedron3D(selPts[0].id, selPts[1].id, selPts[2].id);
-      set({ activeTool3D: 'select', pendingIds: [] });
-      return;
-    }
-
-    if (tool === 'tetrahedron3d' || tool === 'pyramid4_3d') {
-      let prefill: string[] = [];
-      if (selPts.length === 2) {
-        prefill = [selPts[0].id, selPts[1].id];
-      } else if (selSeg) {
-        const seg = state.scene3d.segments.find((s) => s.id === selSeg.id);
-        if (seg) prefill = [seg.p1Id, seg.p2Id];
-      } else if (state.scene3d.points.length === 2 && state.scene3d.polyhedra.length === 0) {
-        prefill = [state.scene3d.points[0].id, state.scene3d.points[1].id];
-      }
-      if (prefill.length === 2) {
-        set({
-          activeTool3D: tool,
-          pendingIds: prefill,
-          selection: prefill.map((id) => ({ domain: '3d' as const, type: 'point' as const, id })),
-          toast: {
-            text:
-              tool === 'tetrahedron3d'
-                ? 'Đã nhận 2 điểm đầu — Chạm điểm thứ 3 để dựng ngay Chóp tứ diện S.ABC!'
-                : 'Đã nhận 2 điểm cạnh đáy — Chạm điểm thứ 3 để dựng ngay Chóp tứ giác S.ABCD!',
-            tone: 'info',
-          },
-        });
-        return;
-      }
-    }
-
-    set({ activeTool3D: tool, pendingIds: [] });
-  },
+  setMode: (mode) => set({ mode, pendingIds: [], pendingSegment3DId: null }),
+  setTool2D: (tool) => set({ activeTool2D: tool, pendingIds: [], pendingSegment3DId: null }),
+  setTool3D: (tool) => set({ activeTool3D: tool, pendingIds: [], pendingSegment3DId: null }),
+  setSegment3DMode: (segment3DMode) =>
+    set((s) => ({
+      segment3DMode,
+      pendingIds: segment3DMode === 'segmentOnly' && s.pendingIds.length >= 2 ? [] : s.pendingIds,
+      pendingSegment3DId: segment3DMode === 'segmentOnly' ? null : s.pendingSegment3DId,
+    })),
+  finishPendingSegment3D: () => set({ pendingIds: [], pendingSegment3DId: null }),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   toggleMultiSelectMode: () => set((s) => ({ multiSelectMode: !s.multiSelectMode })),
   updateView: (partial) => set((s) => ({ view: { ...s.view, ...partial } })),
@@ -440,7 +429,7 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
       }
       return { selection: [item] };
     }),
-  clearSelection: () => set({ selection: [], pendingIds: [] }),
+  clearSelection: () => set({ selection: [], pendingIds: [], pendingSegment3DId: null }),
 
   pushHistory: () => {
     const { sliders, scene2d, scene3d, past } = get();
@@ -461,6 +450,7 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
       future: [current, ...future.slice(0, 29)],
       selection: [],
       pendingIds: [],
+      pendingSegment3DId: null,
     });
   },
 
@@ -477,6 +467,7 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
       future: future.slice(1),
       selection: [],
       pendingIds: [],
+      pendingSegment3DId: null,
     });
   },
 
@@ -1150,7 +1141,21 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
       },
     })),
 
-  buildInteractiveTetrahedron3D: (p1Id, p2Id, p3Id) => {
+  updatePoints3DZBulk: (updates) =>
+    set((s) => {
+      const zMap = new Map(updates.map((u) => [u.id, u.z]));
+      return {
+        scene3d: {
+          ...s.scene3d,
+          points: s.scene3d.points.map((p) => {
+            const nextZ = zMap.get(p.id);
+            return nextZ !== undefined ? { ...p, z: nextZ, exprCoords: undefined } : p;
+          }),
+        },
+      };
+    }),
+
+  buildInteractiveTetrahedron3D: (p1Id, p2Id, p3Id, removeSegmentId = null) => {
     const state = get();
     const scope = Object.fromEntries(state.sliders.map((sl) => [sl.name, sl.value]));
     const ptMap = resolvePoints3D(state.scene3d.points, state.scene3d.planes, scope);
@@ -1211,9 +1216,11 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
 
     set((s) => ({
       pendingIds: [],
+      pendingSegment3DId: null,
       selection: [{ domain: '3d', type: 'point', id: sId }],
       scene3d: {
         ...s.scene3d,
+        segments: removeSegmentId ? s.scene3d.segments.filter((seg) => seg.id !== removeSegmentId) : s.scene3d.segments,
         points: [
           ...s.scene3d.points,
           { id: sId, name: sName, x: sPos[0], y: sPos[1], z: sPos[2], color: '#D93829', visible: true, showLabel: true },
@@ -1222,10 +1229,10 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
       },
       toast: { text: `Đã dựng ${poly.name} (nhấn giữ đỉnh ${sName} để kéo cao độ z)`, tone: 'success' },
     }));
-    return sId;
+    return { pointIds: [sId], anchor: sPos, baseZ: g[2], label: 'z' };
   },
 
-  buildInteractivePyramid4_3D: (p1Id, p2Id, apexPos) => {
+  buildInteractivePyramid4_3D: (p1Id, p2Id, apexPos, removeSegmentId = null) => {
     const state = get();
     const scope = Object.fromEntries(state.sliders.map((sl) => [sl.name, sl.value]));
     const ptMap = resolvePoints3D(state.scene3d.points, state.scene3d.planes, scope);
@@ -1235,7 +1242,6 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
 
     const u = sub3(p2, p1);
     const side = Math.max(0.5, len3(u));
-    // Perpendicular vector in Oxy plane to form square ABCD
     let perp: Vec3 = [-u[1], u[0], 0];
     if (len3(perp) < 1e-4) perp = [0, side, 0];
     else perp = scale3(normalize3(perp), side);
@@ -1311,24 +1317,26 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
 
     set((s) => ({
       pendingIds: [],
+      pendingSegment3DId: null,
       selection: [{ domain: '3d', type: 'point', id: ptS.id }],
       scene3d: {
         ...s.scene3d,
+        segments: removeSegmentId ? s.scene3d.segments.filter((seg) => seg.id !== removeSegmentId) : s.scene3d.segments,
         points: [...s.scene3d.points, ptC, ptD, ptS],
         polyhedra: [...s.scene3d.polyhedra, poly],
       },
       toast: { text: `Đã dựng ${poly.name} (nhấn giữ đỉnh ${sName} để kéo cao độ z)`, tone: 'success' },
     }));
-    return ptS.id;
+    return { pointIds: [ptS.id], anchor: sCoords, baseZ: p1[2], label: 'z' };
   },
 
-  buildInteractiveBox3D: (p1Id, p2Id, height) => {
+  buildInteractiveBox3D: (p1Id, p2Id, height, removeSegmentId = null) => {
     const state = get();
     const scope = Object.fromEntries(state.sliders.map((sl) => [sl.name, sl.value]));
     const ptMap = resolvePoints3D(state.scene3d.points, state.scene3d.planes, scope);
     const p1 = ptMap.get(p1Id);
     const p2 = ptMap.get(p2Id);
-    if (!p1 || !p2) return;
+    if (!p1 || !p2) return null;
 
     const u = sub3(p2, p1);
     const side = Math.max(0.5, len3(u));
@@ -1376,25 +1384,266 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
 
     set((s) => ({
       pendingIds: [],
+      pendingSegment3DId: null,
       selection: [{ domain: '3d', type: 'polyhedron', id: poly.id }],
       scene3d: {
         ...s.scene3d,
+        segments: removeSegmentId ? s.scene3d.segments.filter((seg) => seg.id !== removeSegmentId) : s.scene3d.segments,
         points: [...s.scene3d.points, ptC, ptD, ptA1, ptB1, ptC1, ptD1],
         polyhedra: [...s.scene3d.polyhedra, poly],
       },
       toast: { text: `Đã dựng ${poly.name}`, tone: 'success' },
     }));
+    return {
+      pointIds: [ptA1.id, ptB1.id, ptC1.id, ptD1.id],
+      anchor: [ptC1.x, ptC1.y, ptC1.z],
+      baseZ: p1[2],
+      label: 'h',
+    };
+  },
+
+  buildInteractiveBox3DFrom3Points: (p1Id, p2Id, thirdTarget, removeSegmentId = null) => {
+    const state = get();
+    const scope = Object.fromEntries(state.sliders.map((sl) => [sl.name, sl.value]));
+    const ptMap = resolvePoints3D(state.scene3d.points, state.scene3d.planes, scope);
+    const p1 = ptMap.get(p1Id);
+    const p2 = ptMap.get(p2Id);
+    if (!p1 || !p2) return null;
+
+    const snap = (v: number) => Number(v.toFixed(2));
+    const u = sub3(p2, p1);
+    const sideA = Math.max(0.5, len3(u));
+    const perpRaw: Vec3 = [-u[1], u[0], 0];
+    const unitV: Vec3 = len3(perpRaw) > 1e-4 ? normalize3(perpRaw) : [0, 1, 0];
+
+    const n1 = state.scene3d.points.find((p) => p.id === p1Id)?.name ?? 'A';
+    const n2 = state.scene3d.points.find((p) => p.id === p2Id)?.name ?? 'B';
+
+    const newPts: Point3D[] = [];
+    let baseIds: [string, string, string, string];
+    let baseCoords: [Vec3, Vec3, Vec3, Vec3];
+    let baseNames: [string, string, string, string];
+    let h: number;
+
+    if (thirdTarget.pointId) {
+      const p3 = ptMap.get(thirdTarget.pointId);
+      if (!p3) return get().buildInteractiveBox3D(p1Id, p2Id, undefined, removeSegmentId);
+      // If existing 3rd point is elevated in Z, use it as box height over square base AB!
+      if (Math.abs(p3[2] - p1[2]) >= 0.25) {
+        return get().buildInteractiveBox3D(p1Id, p2Id, Math.abs(p3[2] - p1[2]), removeSegmentId);
+      }
+      const n3 = state.scene3d.points.find((p) => p.id === thirdTarget.pointId)?.name ?? 'C';
+      const crossCheck = len3(cross3(sub3(p2, p1), sub3(p3, p1)));
+      if (crossCheck < 1e-2) {
+        return get().buildInteractiveBox3D(p1Id, p2Id, undefined, removeSegmentId);
+      }
+
+      if (dist3(p3, p2) <= dist3(p3, p1)) {
+        // Base cycle: A -> B -> C(existing) -> D
+        const dCoords: Vec3 = [snap(p1[0] + (p3[0] - p2[0])), snap(p1[1] + (p3[1] - p2[1])), snap(p1[2])];
+        const dName = nextPointName(state.scene3d.points, ['D', 'E', 'F', 'G', 'M', 'N']);
+        const ptD: Point3D = { id: uid('p3'), name: dName, x: dCoords[0], y: dCoords[1], z: dCoords[2], color: '#D93829', visible: true, showLabel: true };
+        newPts.push(ptD);
+        baseIds = [p1Id, p2Id, thirdTarget.pointId, ptD.id];
+        baseCoords = [p1, p2, p3, dCoords];
+        baseNames = [n1, n2, n3, dName];
+        h = Math.max(1.5, Math.round(((sideA + dist3(p2, p3)) / 2) * 2) / 2);
+      } else {
+        // Base cycle: A -> B -> D -> C(existing)
+        const dCoords: Vec3 = [snap(p2[0] + (p3[0] - p1[0])), snap(p2[1] + (p3[1] - p1[1])), snap(p2[2])];
+        const dName = nextPointName(state.scene3d.points, ['D', 'E', 'F', 'G', 'M', 'N']);
+        const ptD: Point3D = { id: uid('p3'), name: dName, x: dCoords[0], y: dCoords[1], z: dCoords[2], color: '#D93829', visible: true, showLabel: true };
+        newPts.push(ptD);
+        baseIds = [p1Id, p2Id, ptD.id, thirdTarget.pointId];
+        baseCoords = [p1, p2, dCoords, p3];
+        baseNames = [n1, n2, dName, n3];
+        h = Math.max(1.5, Math.round(((sideA + dist3(p1, p3)) / 2) * 2) / 2);
+      }
+    } else if (thirdTarget.coords) {
+      // Clicked empty ground plane at 3rd step -> clean perpendicular rectangular base ABCD!
+      const cRaw = thirdTarget.coords;
+      const dx = cRaw[0] - p2[0];
+      const dy = cRaw[1] - p2[1];
+      const bRaw = dx * unitV[0] + dy * unitV[1];
+      const bSign = bRaw >= 0 ? 1 : -1;
+      const bMag = Math.abs(bRaw) < 0.45 ? Math.max(1.5, sideA) : state.view.snapToGrid ? Math.round(Math.abs(bRaw) * 2) / 2 : Number(Math.abs(bRaw).toFixed(2));
+      const bSigned = bSign * bMag;
+
+      const cCoords: Vec3 = [snap(p2[0] + unitV[0] * bSigned), snap(p2[1] + unitV[1] * bSigned), snap(p2[2])];
+      const dCoords: Vec3 = [snap(p1[0] + unitV[0] * bSigned), snap(p1[1] + unitV[1] * bSigned), snap(p1[2])];
+
+      const cName = nextPointName(state.scene3d.points, ['C', 'D', 'E', 'F', 'M', 'N']);
+      const ptC: Point3D = { id: uid('p3'), name: cName, x: cCoords[0], y: cCoords[1], z: cCoords[2], color: '#D93829', visible: true, showLabel: true };
+      const dName = nextPointName([...state.scene3d.points, ptC], ['D', 'E', 'F', 'G', 'M', 'N']);
+      const ptD: Point3D = { id: uid('p3'), name: dName, x: dCoords[0], y: dCoords[1], z: dCoords[2], color: '#D93829', visible: true, showLabel: true };
+      newPts.push(ptC, ptD);
+      baseIds = [p1Id, p2Id, ptC.id, ptD.id];
+      baseCoords = [p1, p2, cCoords, dCoords];
+      baseNames = [n1, n2, cName, dName];
+      h = Math.max(1.5, Math.round(((sideA + bMag) / 2) * 2) / 2);
+    } else {
+      return get().buildInteractiveBox3D(p1Id, p2Id, undefined, removeSegmentId);
+    }
+
+    // Create top 4 vertices A', B', C', D'
+    const topPts: Point3D[] = baseCoords.map((bc, idx) => ({
+      id: uid('p3'),
+      name: `${baseNames[idx]}'`,
+      x: snap(bc[0]),
+      y: snap(bc[1]),
+      z: snap(bc[2] + h),
+      color: '#D93829',
+      visible: true,
+      showLabel: true,
+    }));
+    newPts.push(...topPts);
+
+    const [b0, b1, b2, b3] = baseIds;
+    const [t0, t1, t2, t3] = topPts.map((p) => p.id);
+
+    // Ensure outward face normals regardless of whether 3rd point was clicked left or right of AB!
+    const crossZ =
+      (baseCoords[1][0] - baseCoords[0][0]) * (baseCoords[2][1] - baseCoords[1][1]) -
+      (baseCoords[1][1] - baseCoords[0][1]) * (baseCoords[2][0] - baseCoords[1][0]);
+    const ccw = crossZ >= 0;
+
+    const faces: string[][] = ccw
+      ? [
+          [b0, b3, b2, b1],
+          [t0, t1, t2, t3],
+          [b0, b1, t1, t0],
+          [b1, b2, t2, t1],
+          [b2, b3, t3, t2],
+          [b3, b0, t0, t3],
+        ]
+      : [
+          [b0, b1, b2, b3],
+          [t0, t3, t2, t1],
+          [b1, b0, t0, t1],
+          [b2, b1, t1, t2],
+          [b3, b2, t2, t3],
+          [b0, b3, t3, t0],
+        ];
+
+    const poly: Polyhedron3D = {
+      id: uid('poly'),
+      name: `Hình hộp ${baseNames.join('')}.${baseNames.map((n) => `${n}'`).join('')}`,
+      kind: 'box',
+      vertexIds: [b0, b1, b2, b3, t0, t1, t2, t3],
+      faces,
+      color: '#7C3AED',
+      faceOpacity: state.view.globalFaceOpacity,
+      visible: true,
+      autoDashed: true,
+    };
+
+    set((s) => ({
+      pendingIds: [],
+      pendingSegment3DId: null,
+      selection: [{ domain: '3d', type: 'polyhedron', id: poly.id }],
+      scene3d: {
+        ...s.scene3d,
+        segments: removeSegmentId ? s.scene3d.segments.filter((seg) => seg.id !== removeSegmentId) : s.scene3d.segments,
+        points: [...s.scene3d.points, ...newPts],
+        polyhedra: [...s.scene3d.polyhedra, poly],
+      },
+      toast: { text: `Đã tự nối thành ${poly.name} (nhấn giữ điểm thứ 3 để kéo chiều cao h)`, tone: 'success' },
+    }));
+
+    return {
+      pointIds: [t0, t1, t2, t3],
+      anchor: [topPts[2].x, topPts[2].y, topPts[2].z],
+      baseZ: baseCoords[0][2],
+      label: 'h',
+    };
   },
 
   handlePoint3DClick: (pointId, multi = false) => {
-    const { activeTool3D, pendingIds } = get();
+    const { activeTool3D, pendingIds, segment3DMode, pendingSegment3DId } = get();
     if (activeTool3D === 'select' || activeTool3D === 'point') {
       get().selectItem({ domain: '3d', type: 'point', id: pointId }, multi);
       return null;
     }
 
+    // Integrated Smart Segment Tool: 2 clicks = segment AB -> 3rd click = auto-build Box / Tetrahedron / Pyramid4!
+    if (activeTool3D === 'segment') {
+      if (pendingIds.length === 0) {
+        set({
+          pendingIds: [pointId],
+          pendingSegment3DId: null,
+          selection: [{ domain: '3d', type: 'point', id: pointId }],
+        });
+        return null;
+      }
+
+      if (pendingIds.length === 1) {
+        if (pendingIds[0] === pointId) return null;
+        const p1Id = pendingIds[0];
+        const p2Id = pointId;
+        const p1 = get().scene3d.points.find((p) => p.id === p1Id);
+        const p2 = get().scene3d.points.find((p) => p.id === p2Id);
+        if (!p1 || !p2) return null;
+
+        get().pushHistory();
+        const segId = uid('s3');
+        const nextPending = segment3DMode === 'segmentOnly' ? [] : [p1Id, p2Id];
+        const nextSegId = segment3DMode === 'segmentOnly' ? null : segId;
+        const hintMsg =
+          segment3DMode === 'box'
+            ? `Đã nối ${p1.name}${p2.name} · Chấm tiếp điểm thứ 3 để tự nối thành Hình hộp 3D`
+            : segment3DMode === 'tetrahedron'
+            ? `Đã nối ${p1.name}${p2.name} · Chấm điểm thứ 3 để dựng ngay Chóp tứ diện`
+            : segment3DMode === 'pyramid4'
+            ? `Đã nối ${p1.name}${p2.name} · Chấm điểm thứ 3 để đặt đỉnh Chóp tứ giác`
+            : `Đã nối đoạn thẳng ${p1.name}${p2.name}`;
+
+        set((s) => ({
+          pendingIds: nextPending,
+          pendingSegment3DId: nextSegId,
+          selection: [
+            { domain: '3d', type: 'point', id: p1Id },
+            { domain: '3d', type: 'point', id: p2Id },
+          ],
+          scene3d: {
+            ...s.scene3d,
+            segments: [
+              ...s.scene3d.segments,
+              { id: segId, name: `${p1.name}${p2.name}`, p1Id, p2Id, color: '#0F1B2D', style: 'solid', visible: true, showLength: true },
+            ],
+          },
+          toast: { text: hintMsg, tone: 'success' },
+        }));
+        return null;
+      }
+
+      // Step 3 (pendingIds.length === 2): clicking A or B again stops the chain & keeps segment AB; clicking 3rd point builds the 3D solid!
+      if (pendingIds.includes(pointId)) {
+        set({
+          pendingIds: [],
+          pendingSegment3DId: null,
+          toast: { text: 'Đã giữ nguyên đoạn thẳng', tone: 'info' },
+        });
+        return null;
+      }
+
+      get().pushHistory();
+      if (segment3DMode === 'box') {
+        return get().buildInteractiveBox3DFrom3Points(pendingIds[0], pendingIds[1], { pointId }, pendingSegment3DId);
+      }
+      if (segment3DMode === 'tetrahedron') {
+        return get().buildInteractiveTetrahedron3D(pendingIds[0], pendingIds[1], pointId, pendingSegment3DId);
+      }
+      if (segment3DMode === 'pyramid4') {
+        const state = get();
+        const scope = Object.fromEntries(state.sliders.map((sl) => [sl.name, sl.value]));
+        const ptMap = resolvePoints3D(state.scene3d.points, state.scene3d.planes, scope);
+        const p3Pos = ptMap.get(pointId);
+        return get().buildInteractivePyramid4_3D(pendingIds[0], pendingIds[1], p3Pos, pendingSegment3DId);
+      }
+      return null;
+    }
+
     if (
-      activeTool3D === 'segment' ||
       activeTool3D === 'line' ||
       activeTool3D === 'vector' ||
       activeTool3D === 'midpoint' ||
@@ -1413,7 +1662,6 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
             { domain: '3d', type: 'point', id: p2 },
           ],
         });
-        if (activeTool3D === 'segment') get().createSegmentFromSelection('3d');
         if (activeTool3D === 'line') get().createLineFromSelection('3d');
         if (activeTool3D === 'vector') get().createVectorFromSelection('3d');
         if (activeTool3D === 'midpoint') get().createMidpointFromSelection('3d');
@@ -1421,79 +1669,6 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
         if (activeTool3D === 'distance') get().createDistanceMeasureFromSelection('3d');
       }
       return null;
-    }
-
-    if (activeTool3D === 'tetrahedron3d') {
-      if (pendingIds.includes(pointId)) {
-        if (pendingIds.length === 2 && pendingIds[0] === pointId) {
-          set({
-            pendingIds: [pointId],
-            selection: [{ domain: '3d', type: 'point', id: pointId }],
-          });
-        }
-        return null;
-      }
-      const next = [...pendingIds, pointId];
-      if (next.length < 3) {
-        set({
-          pendingIds: next,
-          selection: next.map((id) => ({ domain: '3d' as const, type: 'point' as const, id })),
-        });
-        return null;
-      } else {
-        get().pushHistory();
-        return get().buildInteractiveTetrahedron3D(next[0], next[1], next[2]);
-      }
-    }
-
-    if (activeTool3D === 'pyramid4_3d') {
-      if (pendingIds.includes(pointId)) {
-        if (pendingIds.length === 2 && pendingIds[0] === pointId) {
-          set({
-            pendingIds: [pointId],
-            selection: [{ domain: '3d', type: 'point', id: pointId }],
-          });
-        }
-        return null;
-      }
-      const next = [...pendingIds, pointId];
-      if (next.length < 2) {
-        set({
-          pendingIds: next,
-          selection: [{ domain: '3d', type: 'point', id: pointId }],
-        });
-        return null;
-      } else if (next.length === 2) {
-        set({
-          pendingIds: next,
-          selection: next.map((id) => ({ domain: '3d' as const, type: 'point' as const, id })),
-          toast: { text: 'Bước 3/3: Chạm vị trí bất kỳ (hoặc nhấn giữ kéo cao độ) để đặt đỉnh chóp S', tone: 'info' },
-        });
-        return null;
-      } else {
-        const state = get();
-        const scope = Object.fromEntries(state.sliders.map((sl) => [sl.name, sl.value]));
-        const ptMap = resolvePoints3D(state.scene3d.points, state.scene3d.planes, scope);
-        const p3Pos = ptMap.get(pointId);
-        get().pushHistory();
-        return get().buildInteractivePyramid4_3D(next[0], next[1], p3Pos);
-      }
-    }
-
-    if (activeTool3D === 'box3d') {
-      if (pendingIds.includes(pointId)) return null;
-      const next = [...pendingIds, pointId];
-      if (next.length < 2) {
-        set({
-          pendingIds: next,
-          selection: [{ domain: '3d', type: 'point', id: pointId }],
-        });
-        return null;
-      } else {
-        get().pushHistory();
-        get().buildInteractiveBox3D(next[0], next[1]);
-        return null;
-      }
     }
 
     if (activeTool3D === 'plane3p' || activeTool3D === 'crossSection' || activeTool3D === 'angle') {
@@ -1518,18 +1693,27 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
   },
 
   handleGround3DConstructionClick: (coords) => {
-    const { activeTool3D, pendingIds } = get();
+    const { activeTool3D, pendingIds, segment3DMode, pendingSegment3DId } = get();
     if (activeTool3D === 'select') return null;
 
-    if (activeTool3D === 'pyramid4_3d' && pendingIds.length === 2) {
-      get().pushHistory();
-      return get().buildInteractivePyramid4_3D(pendingIds[0], pendingIds[1], coords);
+    // Step 3 of integrated Segment tool on empty ground plane:
+    if (activeTool3D === 'segment' && pendingIds.length === 2) {
+      if (segment3DMode === 'box') {
+        get().pushHistory();
+        return get().buildInteractiveBox3DFrom3Points(pendingIds[0], pendingIds[1], { coords }, pendingSegment3DId);
+      }
+      if (segment3DMode === 'pyramid4') {
+        get().pushHistory();
+        return get().buildInteractivePyramid4_3D(pendingIds[0], pendingIds[1], coords, pendingSegment3DId);
+      }
+      // For 'tetrahedron', fall through to create point C at coords then build Tetrahedron S.ABC!
     }
 
-    // For any point-based construction tool, clicking empty ground auto-creates the vertex & advances!
+    // Auto-create vertex at clicked ground position & advance the active construction tool
     const newPtId = get().addPoint3D(coords[0], coords[1], coords[2]);
-    const apexId = get().handlePoint3DClick(newPtId, false);
-    return apexId ?? newPtId;
+    const dragTarget = get().handlePoint3DClick(newPtId, false);
+    if (dragTarget) return dragTarget;
+    return { pointIds: [newPtId], anchor: coords, baseZ: 0, label: 'z' };
   },
 
   addQuickSolid3D: (kind, params) => {
@@ -1983,6 +2167,13 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
     if (pts.length < 2) return;
     get().pushHistory();
     get().buildInteractiveBox3D(pts[0].id, pts[1].id);
+  },
+
+  createBoxFrom3SelectedPoints: () => {
+    const pts = get().selection.filter((x) => x.domain === '3d' && x.type === 'point');
+    if (pts.length < 3) return;
+    get().pushHistory();
+    get().buildInteractiveBox3DFrom3Points(pts[0].id, pts[1].id, { pointId: pts[2].id });
   },
 
   createCrossSectionFromSelection: () => {

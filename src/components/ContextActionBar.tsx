@@ -4,6 +4,8 @@ import { useGeometryStore } from '../store/useGeometryStore';
 import { formatNum } from '../math/geometry2d';
 import { formatShortcutBadge } from '../types/shortcuts';
 
+import type { Segment3DSolidMode } from '../types/geometry';
+
 const TOOL_2D_HINTS: Record<string, string> = {
   point: 'Chạm bất kỳ vị trí nào để chấm điểm mới',
   segment: 'Chọn lần lượt 2 điểm để nối đoạn thẳng',
@@ -19,10 +21,7 @@ const TOOL_2D_HINTS: Record<string, string> = {
 
 const TOOL_3D_HINTS: Record<string, string> = {
   point: 'Chạm mặt phẳng để đặt điểm · Nhấn giữ và kéo lên/xuống để nâng độ cao z',
-  segment: 'Chạm lần lượt 2 điểm (hoặc chấm lên mặt phẳng) để nối đoạn thẳng',
-  tetrahedron3d: 'Chạm 3 điểm A → B → C để dựng ngay Chóp tứ diện S.ABC (nhấn giữ bước 3 để kéo cao độ S)',
-  pyramid4_3d: 'Chạm 2 điểm cạnh đáy A → B rồi chạm điểm thứ 3 để dựng ngay Chóp tứ giác S.ABCD',
-  box3d: "Chạm 2 điểm cạnh đáy A → B để dựng ngay Khối hộp / Lập phương ABCD.A'B'C'D'",
+  segment: 'Chấm 2 điểm nối đoạn · Chấm tiếp điểm thứ 3 tự dựng hình khối',
   line: 'Chạm 2 điểm để dựng đường thẳng không gian',
   vector: 'Chạm điểm gốc rồi điểm ngọn để vẽ vectơ 3D',
   plane3p: 'Chạm 3 điểm không thẳng hàng để dựng mặt phẳng (ABC)',
@@ -33,11 +32,21 @@ const TOOL_3D_HINTS: Record<string, string> = {
   angle: 'Chạm 3 điểm A → B (đỉnh) → C để đo góc không gian ∠ABC',
 };
 
+const SEGMENT_3D_MODE_OPTIONS: Array<{ id: Segment3DSolidMode; label: string }> = [
+  { id: 'box', label: 'Hình hộp' },
+  { id: 'tetrahedron', label: 'Chóp tứ diện' },
+  { id: 'pyramid4', label: 'Chóp tứ giác' },
+  { id: 'segmentOnly', label: 'Chỉ nối đoạn' },
+];
+
 export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) => {
   const activeTool2D = useGeometryStore((s) => s.activeTool2D);
   const activeTool3D = useGeometryStore((s) => s.activeTool3D);
+  const segment3DMode = useGeometryStore((s) => s.segment3DMode);
   const setTool2D = useGeometryStore((s) => s.setTool2D);
   const setTool3D = useGeometryStore((s) => s.setTool3D);
+  const setSegment3DMode = useGeometryStore((s) => s.setSegment3DMode);
+  const finishPendingSegment3D = useGeometryStore((s) => s.finishPendingSegment3D);
   const pendingIds = useGeometryStore((s) => s.pendingIds);
   const selection = useGeometryStore((s) => s.selection).filter((x) => x.domain === domain);
   const clearSelection = useGeometryStore((s) => s.clearSelection);
@@ -58,6 +67,7 @@ export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) 
   const createTetrahedronFromSelection = useGeometryStore((s) => s.createTetrahedronFromSelection);
   const createPyramid4FromSelection = useGeometryStore((s) => s.createPyramid4FromSelection);
   const createCubeFromSelection = useGeometryStore((s) => s.createCubeFromSelection);
+  const createBoxFrom3SelectedPoints = useGeometryStore((s) => s.createBoxFrom3SelectedPoints);
   const createCrossSectionFromSelection = useGeometryStore((s) => s.createCrossSectionFromSelection);
   const createFootOnPlaneFromSelection = useGeometryStore((s) => s.createFootOnPlaneFromSelection);
   const createReflectAcrossPlaneFromSelection = useGeometryStore((s) => s.createReflectAcrossPlaneFromSelection);
@@ -71,8 +81,90 @@ export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) 
   const isDark = view.theme === 'dark';
   const tool = domain === '2d' ? activeTool2D : activeTool3D;
 
-  // 1. Active multi-step tool prompt
+  // 1. Active multi-step tool prompt (with integrated 3rd-point 3D solid switcher inside Segment!)
   if (tool !== 'select') {
+    if (domain === '3d' && tool === 'segment') {
+      const stepHint =
+        pendingIds.length === 0
+          ? 'Chấm điểm 1 → điểm 2 để nối đoạn'
+          : pendingIds.length === 1
+          ? 'Chấm điểm 2 để nối đoạn thẳng'
+          : segment3DMode === 'box'
+          ? 'Đã nối đoạn · Chấm điểm 3 để tự nối thành Hình hộp (nhấn giữ kéo chiều cao)'
+          : segment3DMode === 'tetrahedron'
+          ? 'Đã nối đoạn · Chấm điểm 3 để dựng ngay Chóp tứ diện'
+          : 'Đã nối đoạn · Chấm điểm 3 để đặt đỉnh Chóp tứ giác';
+
+      return (
+        <div
+          className={`pointer-events-auto absolute bottom-3 left-1/2 z-20 flex max-w-[96%] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-xl border px-3 py-1.5 text-xs shadow-sm ${
+            isDark
+              ? 'border-[#1D5CE5]/50 bg-slate-900/95 text-slate-100'
+              : 'border-[#1D5CE5]/35 bg-white/97 text-[#0F1B2D]'
+          }`}
+        >
+          <div className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-[#1D5CE5]" />
+            <span className="font-medium">
+              {stepHint}
+              {pendingIds.length > 0 && <strong className="ml-1 text-[#E06D1F]">({pendingIds.length}/3)</strong>}
+            </span>
+          </div>
+
+          <div
+            className={`flex items-center gap-0.5 rounded-lg border p-0.5 ${
+              isDark ? 'border-slate-700 bg-slate-800/80' : 'border-slate-200 bg-[#F2F5F9]'
+            }`}
+          >
+            <span className="hidden px-1.5 text-[10.5px] font-semibold opacity-65 sm:inline">Điểm 3:</span>
+            {SEGMENT_3D_MODE_OPTIONS.map((opt) => {
+              const active = segment3DMode === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setSegment3DMode(opt.id)}
+                  className={`rounded-md px-2 py-0.5 text-[11px] font-semibold transition-colors ${
+                    active
+                      ? 'bg-[#1D5CE5] text-white shadow-2xs'
+                      : isDark
+                      ? 'text-slate-300 hover:bg-slate-700'
+                      : 'text-slate-600 hover:bg-white'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {pendingIds.length === 2 && (
+            <button
+              type="button"
+              onClick={finishPendingSegment3D}
+              className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold ${
+                isDark
+                  ? 'border-emerald-500/50 bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/60'
+                  : 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+              }`}
+            >
+              Giữ đoạn
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setTool3D('select')}
+            className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${
+              isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            Esc
+          </button>
+        </div>
+      );
+    }
+
     const hint = domain === '2d' ? TOOL_2D_HINTS[tool] : TOOL_3D_HINTS[tool];
     return (
       <div
@@ -145,6 +237,7 @@ export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) 
     } else if (pts.length === 3) {
       actions.push(
         { label: 'Dựng Chóp tứ diện S.ABC', onClick: () => createTetrahedronFromSelection(), accent: true },
+        { label: 'Dựng Hình hộp', onClick: () => createBoxFrom3SelectedPoints(), accent: true },
         { label: 'Dựng mặt phẳng', onClick: () => createPlaneFrom3SelectedPoints(), accent: true },
         { label: 'Cắt thiết diện', onClick: () => createCrossSectionFromSelection(), accent: true },
         { label: 'Đo góc ∠', onClick: () => createAngleMeasureFromSelection('3d') }
