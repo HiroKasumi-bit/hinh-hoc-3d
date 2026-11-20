@@ -193,7 +193,7 @@
 #chuc2011 .k-final-in {
   min-height: 100%;
   display: grid;
-  grid-template-columns: auto fit-content(34rem);
+  grid-template-columns: auto fit-content(46rem);
   justify-content: center;
   align-items: center;
   column-gap: clamp(48px, 7vw, 120px);
@@ -232,7 +232,11 @@
 #chuc2011 .k-title {
   font-family: var(--k-display);
   font-weight: 900;
-  font-size: clamp(64px, min(10.5vw, 18svh), 190px);
+  /* Co theo chỗ trống của cột chữ để dòng "HẸNH 20/11" (~4.9em) không rớt dòng. */
+  font-size: min(
+    clamp(56px, min(9.5vw, 17svh), 170px),
+    calc((100vw - min(400px, 33vw) - clamp(48px, 7vw, 120px) - 12vw) / 4.9)
+  );
   line-height: 0.92;
   letter-spacing: -0.005em;
   text-transform: uppercase;
@@ -245,6 +249,11 @@
 
 #chuc2011 .k-title .k-name {
   color: var(--k-gold);
+  white-space: nowrap;
+}
+
+#chuc2011 .k-title .k-date {
+  color: var(--k-text);
 }
 
 #chuc2011 .k-word {
@@ -332,7 +341,7 @@
   }
 
   #chuc2011 .k-title {
-    font-size: min(17vw, 11svh);
+    font-size: min(15.5vw, 11svh);
   }
 
   #chuc2011 .k-wishes {
