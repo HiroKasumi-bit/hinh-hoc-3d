@@ -184,6 +184,18 @@ export default function App() {
           st.setTool2D('angle');
           st.setTool3D('angle');
           break;
+        case 'tool_tetrahedron3d':
+          if (st.mode === '2d') st.setMode('3d');
+          st.setTool3D('tetrahedron3d');
+          break;
+        case 'tool_pyramid4_3d':
+          if (st.mode === '2d') st.setMode('3d');
+          st.setTool3D('pyramid4_3d');
+          break;
+        case 'tool_box3d':
+          if (st.mode === '2d') st.setMode('3d');
+          st.setTool3D('box3d');
+          break;
         case 'rename_point': {
           const ptSel = st.selection.find((x) => x.type === 'point');
           if (ptSel) {

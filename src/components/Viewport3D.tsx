@@ -16,6 +16,7 @@ import {
   anglePlanePlaneDeg,
   centroid3,
   computePolyhedronEdgeVisibility,
+  cross3,
   dist3,
   distPointToPlane,
   footPointOnPlane,
@@ -40,6 +41,7 @@ import type {
   Polyhedron3D,
   Solid3D,
   Surface3D,
+  Tool3D,
   Vec3,
 } from '../types/geometry';
 
@@ -938,6 +940,285 @@ const Surface3DRenderer: React.FC<{ surface: Surface3D; sliderScope: Record<stri
   );
 };
 
+// ==================== LIVE 3D CONSTRUCTION RUBBER-BAND & GHOST SOLID PREVIEW ====================
+
+function computeSquareBase3D(p1: Vec3, p2: Vec3): { p3: Vec3; p4: Vec3; side: number } {
+  const u = sub3(p2, p1);
+  const side = Math.max(0.5, len3(u));
+  let perp: Vec3 = [-u[1], u[0], 0];
+  if (len3(perp) < 1e-4) perp = [0, side, 0];
+  else perp = scale3(normalize3(perp), side);
+  return {
+    p3: [p2[0] + perp[0], p2[1] + perp[1], p2[2]],
+    p4: [p1[0] + perp[0], p1[1] + perp[1], p1[2]],
+    side,
+  };
+}
+
+const ConstructionPreview3D: React.FC<{
+  activeTool3D: Tool3D;
+  pendingIds: string[];
+  ptMap: Map<string, Vec3>;
+  hoveredPointId: string | null;
+  hoverGroundPos: Vec3 | null;
+  isDark: boolean;
+}> = ({ activeTool3D, pendingIds, ptMap, hoveredPointId, hoverGroundPos, isDark }) => {
+  if (activeTool3D === 'select') return null;
+
+  const targetPos: Vec3 | null = hoveredPointId ? ptMap.get(hoveredPointId) ?? hoverGroundPos : hoverGroundPos;
+
+  const groundRingPts = useMemo(() => {
+    if (!hoverGroundPos || hoveredPointId) return null;
+    const pts: Array<[number, number, number]> = [];
+    const r = 0.22;
+    for (let i = 0; i <= 20; i++) {
+      const t = (i / 20) * Math.PI * 2;
+      pts.push(mathToScene([hoverGroundPos[0] + r * Math.cos(t), hoverGroundPos[1] + r * Math.sin(t), 0.015]));
+    }
+    return pts;
+  }, [hoverGroundPos, hoveredPointId]);
+
+  const pendingPts = pendingIds.map((id) => ptMap.get(id)).filter((p): p is Vec3 => Boolean(p));
+
+  const renderToolPreview = () => {
+    if (!targetPos || pendingPts.length === 0) return null;
+
+    // 1. 2-point linear tools: segment, line, vector, midpoint, ratio, distance
+    if (
+      activeTool3D === 'segment' ||
+      activeTool3D === 'line' ||
+      activeTool3D === 'vector' ||
+      activeTool3D === 'midpoint' ||
+      activeTool3D === 'ratio' ||
+      activeTool3D === 'distance'
+    ) {
+      const p1 = pendingPts[0];
+      const d = dist3(p1, targetPos);
+      if (d < 0.04) return null;
+      const mid: Vec3 = [(p1[0] + targetPos[0]) / 2, (p1[1] + targetPos[1]) / 2, (p1[2] + targetPos[2]) / 2 + 0.22];
+      return (
+        <group>
+          <Line
+            points={[mathToScene(p1), mathToScene(targetPos)]}
+            color="#0284C7"
+            lineWidth={2.8}
+            dashed
+            dashSize={0.18}
+            gapSize={0.11}
+          />
+          <Label3D position={mathToScene(mid)}>
+            <div
+              className={`font-math pointer-events-none select-none whitespace-nowrap rounded border px-1.5 py-0.5 text-[10.5px] font-bold shadow-xs ${
+                isDark ? 'border-sky-400 bg-slate-900/95 text-sky-300' : 'border-sky-500 bg-sky-50/95 text-sky-900'
+              }`}
+            >
+              {formatNum(d, 2)}
+            </div>
+          </Label3D>
+        </group>
+      );
+    }
+
+    // 2. 3-point plane / cross-section / angle tools
+    if (activeTool3D === 'plane3p' || activeTool3D === 'crossSection' || activeTool3D === 'angle') {
+      if (pendingPts.length === 1) {
+        return (
+          <Line
+            points={[mathToScene(pendingPts[0]), mathToScene(targetPos)]}
+            color="#0284C7"
+            lineWidth={2.5}
+            dashed
+            dashSize={0.18}
+            gapSize={0.11}
+          />
+        );
+      }
+      if (pendingPts.length >= 2) {
+        const [p1, p2] = pendingPts;
+        return (
+          <Line
+            points={[mathToScene(p1), mathToScene(p2), mathToScene(targetPos), mathToScene(p1)]}
+            color="#0284C7"
+            lineWidth={2.5}
+            dashed
+            dashSize={0.18}
+            gapSize={0.11}
+          />
+        );
+      }
+    }
+
+    // 3. Tetrahedron 3D (S.ABC): 3 clicks A -> B -> C
+    if (activeTool3D === 'tetrahedron3d') {
+      if (pendingPts.length === 1) {
+        const p1 = pendingPts[0];
+        if (dist3(p1, targetPos) < 0.05) return null;
+        return (
+          <Line
+            points={[mathToScene(p1), mathToScene(targetPos)]}
+            color="#0E9F6E"
+            lineWidth={2.8}
+            dashed
+            dashSize={0.18}
+            gapSize={0.11}
+          />
+        );
+      }
+      if (pendingPts.length >= 2) {
+        const [p1, p2] = pendingPts;
+        const p3 = targetPos;
+        let n = cross3(sub3(p2, p1), sub3(p3, p1));
+        if (n[2] < 0) n = scale3(n, -1);
+        const unitN = len3(n) > 1e-4 ? normalize3(n) : ([0, 0, 1] as Vec3);
+        const avgEdge = (dist3(p1, p2) + dist3(p2, p3) + dist3(p3, p1)) / 3;
+        const h = Math.max(2, Math.round(avgEdge * Math.sqrt(2 / 3) * 2) / 2);
+        const g = centroid3([p1, p2, p3]);
+        const sPos: Vec3 = [g[0] + unitN[0] * h, g[1] + unitN[1] * h, Math.max(1.5, g[2] + unitN[2] * h)];
+        return (
+          <group>
+            {/* Base triangle A-B-C */}
+            <Line
+              points={[mathToScene(p1), mathToScene(p2), mathToScene(p3), mathToScene(p1)]}
+              color="#0E9F6E"
+              lineWidth={2.8}
+            />
+            {/* Ghost lateral edges S-A, S-B, S-C */}
+            <Line points={[mathToScene(sPos), mathToScene(p1)]} color="#E06D1F" lineWidth={2.1} dashed dashSize={0.18} gapSize={0.11} />
+            <Line points={[mathToScene(sPos), mathToScene(p2)]} color="#E06D1F" lineWidth={2.1} dashed dashSize={0.18} gapSize={0.11} />
+            <Line points={[mathToScene(sPos), mathToScene(p3)]} color="#E06D1F" lineWidth={2.1} dashed dashSize={0.18} gapSize={0.11} />
+            <mesh position={mathToScene(sPos)}>
+              <sphereGeometry args={[0.11, 14, 14]} />
+              <meshBasicMaterial color="#E06D1F" transparent opacity={0.85} />
+            </mesh>
+            <Label3D position={mathToScene([sPos[0], sPos[1], sPos[2] + 0.28])}>
+              <span className="pointer-events-none select-none rounded bg-[#E06D1F] px-1.5 py-0.5 text-[10px] font-bold text-white shadow-xs">
+                S
+              </span>
+            </Label3D>
+          </group>
+        );
+      }
+    }
+
+    // 4. Square Pyramid 3D (S.ABCD): 2 clicks for base A->B + 3rd click for apex S
+    if (activeTool3D === 'pyramid4_3d') {
+      if (pendingPts.length === 1) {
+        const p1 = pendingPts[0];
+        const p2 = targetPos;
+        if (dist3(p1, p2) < 0.08) return null;
+        const { p3, p4, side } = computeSquareBase3D(p1, p2);
+        const center = centroid3([p1, p2, p3, p4]);
+        const sPos: Vec3 = [center[0], center[1], p1[2] + Math.max(2.5, side * 1.15)];
+        return (
+          <group>
+            <Line
+              points={[mathToScene(p1), mathToScene(p2), mathToScene(p3), mathToScene(p4), mathToScene(p1)]}
+              color="#1D5CE5"
+              lineWidth={2.6}
+            />
+            <Line points={[mathToScene(sPos), mathToScene(p1)]} color="#E06D1F" lineWidth={1.8} dashed dashSize={0.18} gapSize={0.12} />
+            <Line points={[mathToScene(sPos), mathToScene(p2)]} color="#E06D1F" lineWidth={1.8} dashed dashSize={0.18} gapSize={0.12} />
+            <Line points={[mathToScene(sPos), mathToScene(p3)]} color="#E06D1F" lineWidth={1.8} dashed dashSize={0.18} gapSize={0.12} />
+            <Line points={[mathToScene(sPos), mathToScene(p4)]} color="#E06D1F" lineWidth={1.8} dashed dashSize={0.18} gapSize={0.12} />
+          </group>
+        );
+      }
+      if (pendingPts.length >= 2) {
+        const [p1, p2] = pendingPts;
+        const { p3, p4, side } = computeSquareBase3D(p1, p2);
+        const defaultH = Math.max(2.5, Math.round(side * 1.15 * 2) / 2);
+        const sPos: Vec3 = [
+          targetPos[0],
+          targetPos[1],
+          Math.abs(targetPos[2] - p1[2]) < 0.25 ? p1[2] + defaultH : targetPos[2],
+        ];
+        return (
+          <group>
+            <Line
+              points={[mathToScene(p1), mathToScene(p2), mathToScene(p3), mathToScene(p4), mathToScene(p1)]}
+              color="#1D5CE5"
+              lineWidth={2.8}
+            />
+            <mesh position={mathToScene(p3)}>
+              <sphereGeometry args={[0.085, 12, 12]} />
+              <meshBasicMaterial color="#1D5CE5" />
+            </mesh>
+            <mesh position={mathToScene(p4)}>
+              <sphereGeometry args={[0.085, 12, 12]} />
+              <meshBasicMaterial color="#1D5CE5" />
+            </mesh>
+            <Line points={[mathToScene(sPos), mathToScene(p1)]} color="#E06D1F" lineWidth={2.2} dashed dashSize={0.18} gapSize={0.11} />
+            <Line points={[mathToScene(sPos), mathToScene(p2)]} color="#E06D1F" lineWidth={2.2} dashed dashSize={0.18} gapSize={0.11} />
+            <Line points={[mathToScene(sPos), mathToScene(p3)]} color="#E06D1F" lineWidth={2.2} dashed dashSize={0.18} gapSize={0.11} />
+            <Line points={[mathToScene(sPos), mathToScene(p4)]} color="#E06D1F" lineWidth={2.2} dashed dashSize={0.18} gapSize={0.11} />
+            <mesh position={mathToScene(sPos)}>
+              <sphereGeometry args={[0.12, 14, 14]} />
+              <meshBasicMaterial color="#E06D1F" />
+            </mesh>
+            <Label3D position={mathToScene([sPos[0], sPos[1], sPos[2] + 0.3])}>
+              <span className="pointer-events-none select-none rounded bg-[#E06D1F] px-1.5 py-0.5 text-[10px] font-bold text-white shadow-xs">
+                Đỉnh S
+              </span>
+            </Label3D>
+          </group>
+        );
+      }
+    }
+
+    // 5. Cube / Box 3D (ABCD.A'B'C'D'): 2 clicks A -> B
+    if (activeTool3D === 'box3d' && pendingPts.length === 1) {
+      const p1 = pendingPts[0];
+      const p2 = targetPos;
+      if (dist3(p1, p2) < 0.08) return null;
+      const { p3, p4, side } = computeSquareBase3D(p1, p2);
+      const h = Math.max(1.5, Math.round(side * 2) / 2);
+      const p1Top: Vec3 = [p1[0], p1[1], p1[2] + h];
+      const p2Top: Vec3 = [p2[0], p2[1], p2[2] + h];
+      const p3Top: Vec3 = [p3[0], p3[1], p3[2] + h];
+      const p4Top: Vec3 = [p4[0], p4[1], p4[2] + h];
+      return (
+        <group>
+          <Line
+            points={[mathToScene(p1), mathToScene(p2), mathToScene(p3), mathToScene(p4), mathToScene(p1)]}
+            color="#7C3AED"
+            lineWidth={2.6}
+          />
+          <Line
+            points={[mathToScene(p1Top), mathToScene(p2Top), mathToScene(p3Top), mathToScene(p4Top), mathToScene(p1Top)]}
+            color="#7C3AED"
+            lineWidth={2}
+            dashed
+            dashSize={0.18}
+            gapSize={0.11}
+          />
+          <Line points={[mathToScene(p1), mathToScene(p1Top)]} color="#7C3AED" lineWidth={1.8} dashed dashSize={0.16} gapSize={0.1} />
+          <Line points={[mathToScene(p2), mathToScene(p2Top)]} color="#7C3AED" lineWidth={1.8} dashed dashSize={0.16} gapSize={0.1} />
+          <Line points={[mathToScene(p3), mathToScene(p3Top)]} color="#7C3AED" lineWidth={1.8} dashed dashSize={0.16} gapSize={0.1} />
+          <Line points={[mathToScene(p4), mathToScene(p4Top)]} color="#7C3AED" lineWidth={1.8} dashed dashSize={0.16} gapSize={0.1} />
+        </group>
+      );
+    }
+
+    return null;
+  };
+
+  return (
+    <group>
+      {/* Subtle ground target cursor ring when hovering empty ground plane in any construction tool */}
+      {groundRingPts && hoverGroundPos && (
+        <group>
+          <Line points={groundRingPts} color="#0284C7" lineWidth={1.8} />
+          <mesh position={mathToScene([hoverGroundPos[0], hoverGroundPos[1], 0.015])}>
+            <sphereGeometry args={[0.055, 12, 12]} />
+            <meshBasicMaterial color="#0284C7" />
+          </mesh>
+        </group>
+      )}
+      {renderToolPreview()}
+    </group>
+  );
+};
+
 // ==================== MAIN 3D SCENE CONTENT WITH PRESS-AND-HOLD Z ELEVATION ====================
 
 const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl | null> }> = ({ controlsRef }) => {
@@ -949,12 +1230,24 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
   const pendingIds = useGeometryStore((s) => s.pendingIds);
   const activeTool3D = useGeometryStore((s) => s.activeTool3D);
   const handlePoint3DClick = useGeometryStore((s) => s.handlePoint3DClick);
+  const handleGround3DConstructionClick = useGeometryStore((s) => s.handleGround3DConstructionClick);
   const selectItem = useGeometryStore((s) => s.selectItem);
   const addPoint3D = useGeometryStore((s) => s.addPoint3D);
   const updatePoint3DCoords = useGeometryStore((s) => s.updatePoint3DCoords);
   const pushHistory = useGeometryStore((s) => s.pushHistory);
 
   const isDark = view.theme === 'dark';
+
+  // Hover state for vivid point glow & live construction preview
+  const [hoveredPointId, setHoveredPointId] = useState<string | null>(null);
+  const [hoverGroundPos, setHoverGroundPos] = useState<Vec3 | null>(null);
+
+  useEffect(() => {
+    setHoverGroundPos(null);
+    return () => {
+      document.body.style.cursor = 'auto';
+    };
+  }, [activeTool3D]);
 
   // Press-and-hold Z-drag session ref + reactive HUD
   const dragRef = useRef<ZDragSession | null>(null);
@@ -988,8 +1281,8 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
       const dx = e.clientX - session.startClientX;
       const dy = session.startClientY - e.clientY; // positive when dragging UP
 
-      // If existing point is being dragged vertically before 180ms timer finishes, activate Z-drag right away!
-      if (!session.activated && session.mode === 'adjust' && Math.abs(dy) >= 8 && Math.abs(dy) >= Math.abs(dx) * 0.8) {
+      // If existing point is being dragged vertically before hold timer finishes, activate Z-drag right away!
+      if (!session.activated && Math.abs(dy) >= 10 && Math.abs(dy) >= Math.abs(dx) * 1.1) {
         if (session.timerId !== null) {
           window.clearTimeout(session.timerId);
           session.timerId = null;
@@ -997,12 +1290,12 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
         session.activated = true;
         session.moved = true;
         suppressClickIdRef.current = session.pointId;
-        pushHistory();
+        if (session.mode === 'adjust') pushHistory();
         if (controlsRef.current) controlsRef.current.enabled = false;
         if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
           try { navigator.vibrate(16); } catch { /* ignore */ }
         }
-        setZHud({ pointId: session.pointId, x: session.baseX, y: session.baseY, z: session.baseZ, mode: 'adjust' });
+        setZHud({ pointId: session.pointId, x: session.baseX, y: session.baseY, z: session.baseZ, mode: session.mode });
       }
 
       if (!session.activated) return;
@@ -1024,14 +1317,25 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
       if (session.timerId !== null) {
         window.clearTimeout(session.timerId);
       }
-      if (session.activated || session.moved) {
+
+      // If this was a quick tap/click on an existing point (in 'select' mode) without Z-dragging, select it reliably now!
+      if (session.mode === 'adjust' && !session.activated && !session.moved) {
+        suppressClickIdRef.current = session.pointId;
+        handlePoint3DClick(session.pointId, e.shiftKey || e.ctrlKey || e.metaKey);
+        setTimeout(() => {
+          if (suppressClickIdRef.current === session.pointId) {
+            suppressClickIdRef.current = null;
+          }
+        }, 120);
+      } else if (session.activated || session.moved) {
         suppressClickIdRef.current = session.pointId;
         setTimeout(() => {
           if (suppressClickIdRef.current === session.pointId) {
             suppressClickIdRef.current = null;
           }
-        }, 80);
+        }, 100);
       }
+
       dragRef.current = null;
       setZHud(null);
       if (controlsRef.current) {
@@ -1047,44 +1351,127 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
       window.removeEventListener('pointerup', finishDrag);
       window.removeEventListener('pointercancel', finishDrag);
     };
-  }, [camera, size.height, controlsRef, updatePoint3DCoords, pushHistory]);
+  }, [camera, size.height, controlsRef, updatePoint3DCoords, pushHistory, handlePoint3DClick]);
 
-  // Ground plane press-and-hold point creation (tap = z=0, hold & drag up/down = elevate z!)
+  // Attach optional hold-and-drag Z elevation right after creating a point or pyramid apex S!
+  const attachCreateZDrag = (pointId: string, nativeEvent: PointerEvent, immediateActivate: boolean) => {
+    const pt = useGeometryStore.getState().scene3d.points.find((p) => p.id === pointId);
+    if (!pt || pt.computed) return;
+    if (controlsRef.current) controlsRef.current.enabled = false;
+
+    const session: ZDragSession = {
+      pointId,
+      baseX: pt.x,
+      baseY: pt.y,
+      baseZ: pt.z,
+      startClientX: nativeEvent.clientX,
+      startClientY: nativeEvent.clientY,
+      pointerId: nativeEvent.pointerId,
+      mode: 'create',
+      activated: immediateActivate,
+      moved: false,
+      timerId: null,
+    };
+
+    if (immediateActivate) {
+      setZHud({ pointId, x: pt.x, y: pt.y, z: pt.z, mode: 'create' });
+    } else {
+      session.timerId = window.setTimeout(() => {
+        if (dragRef.current !== session) return;
+        session.activated = true;
+        setZHud({ pointId, x: pt.x, y: pt.y, z: pt.z, mode: 'create' });
+      }, 200);
+    }
+
+    dragRef.current = session;
+  };
+
+  const snapGroundVal = (v: number) => (view.snapToGrid ? Math.round(v * 2) / 2 : Number(v.toFixed(2)));
+
+  // Find closest visible 3D point within magnetic snap tolerance
+  const findMagneticPointId = (groundPos: Vec3, radius = 0.38): string | null => {
+    if (hoveredPointId) return hoveredPointId;
+    let bestId: string | null = null;
+    let bestDist = radius;
+    for (const p of scene3d.points) {
+      if (!p.visible) continue;
+      const pos = ptMap.get(p.id) ?? [p.x, p.y, p.z];
+      const d = dist3(pos, groundPos);
+      if (d < bestDist) {
+        bestDist = d;
+        bestId = p.id;
+      }
+    }
+    return bestId;
+  };
+
+  // Ground plane interaction for both 'point' tool and all 3D construction tools!
   const handleGroundPointerDown = (e: ThreeEvent<PointerEvent>) => {
-    if (activeTool3D !== 'point') return;
+    if (activeTool3D === 'select') return;
     if (e.nativeEvent.button !== 0 && e.nativeEvent.pointerType === 'mouse') return;
     e.stopPropagation();
 
     const m = sceneToMath([e.point.x, e.point.y, e.point.z]);
-    const snap = (v: number) => (view.snapToGrid ? Math.round(v * 2) / 2 : Number(v.toFixed(2)));
-    const x = snap(m[0]);
-    const y = snap(m[1]);
-    const newId = addPoint3D(x, y, 0);
-    selectItem({ domain: '3d', type: 'point', id: newId }, false);
+    const x = snapGroundVal(m[0]);
+    const y = snapGroundVal(m[1]);
 
-    if (controlsRef.current) controlsRef.current.enabled = false;
-    dragRef.current = {
-      pointId: newId,
-      baseX: x,
-      baseY: y,
-      baseZ: 0,
-      startClientX: e.nativeEvent.clientX,
-      startClientY: e.nativeEvent.clientY,
-      pointerId: e.nativeEvent.pointerId,
-      mode: 'create',
-      activated: true,
-      moved: false,
-      timerId: null,
-    };
-    setZHud({ pointId: newId, x, y, z: 0, mode: 'create' });
+    if (activeTool3D === 'point') {
+      const newId = addPoint3D(x, y, 0);
+      selectItem({ domain: '3d', type: 'point', id: newId }, false);
+      attachCreateZDrag(newId, e.nativeEvent, true);
+      return;
+    }
+
+    // In construction tools: if pointer is near an existing point, snap magnetically to it!
+    const nearId = findMagneticPointId([x, y, 0]);
+    if (nearId) {
+      const apexId = handlePoint3DClick(nearId, false);
+      if (apexId) attachCreateZDrag(apexId, e.nativeEvent, false);
+      return;
+    }
+
+    // Otherwise auto-create a vertex at (x, y, 0) and advance the active construction tool!
+    const createdOrApexId = handleGround3DConstructionClick([x, y, 0]);
+    if (createdOrApexId) {
+      attachCreateZDrag(createdOrApexId, e.nativeEvent, false);
+    }
   };
 
-  // Existing free 3D point press-and-hold to adjust Z height!
-  const handleExistingPointPointerDown = (e: ThreeEvent<PointerEvent>, pointId: string, pos: Vec3, isComputed: boolean) => {
-    if (isComputed) return;
+  const handleGroundPointerMove = (e: ThreeEvent<PointerEvent>) => {
+    if (activeTool3D === 'select') return;
+    const m = sceneToMath([e.point.x, e.point.y, e.point.z]);
+    setHoverGroundPos([snapGroundVal(m[0]), snapGroundVal(m[1]), 0]);
+  };
+
+  // Point hitbox pointerdown: instant response in construction tools, or tap/hold-Z in select/point tools!
+  const handlePointHitboxPointerDown = (
+    e: ThreeEvent<PointerEvent>,
+    pointId: string,
+    pos: Vec3,
+    isComputed: boolean
+  ) => {
     if (e.nativeEvent.button !== 0 && e.nativeEvent.pointerType === 'mouse') return;
     e.stopPropagation();
 
+    // Construction tools: register click immediately on pointerdown so it NEVER drops!
+    if (activeTool3D !== 'select' && activeTool3D !== 'point') {
+      suppressClickIdRef.current = pointId;
+      setTimeout(() => {
+        if (suppressClickIdRef.current === pointId) {
+          suppressClickIdRef.current = null;
+        }
+      }, 150);
+      const apexId = handlePoint3DClick(
+        pointId,
+        e.nativeEvent.shiftKey || e.nativeEvent.ctrlKey || e.nativeEvent.metaKey
+      );
+      if (apexId) {
+        attachCreateZDrag(apexId, e.nativeEvent, false);
+      }
+      return;
+    }
+
+    // Select or Point tool: support both instant tap selection (on pointerup) and press-and-hold Z elevation!
     if (controlsRef.current) controlsRef.current.enabled = false;
 
     const session: ZDragSession = {
@@ -1101,17 +1488,19 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
       timerId: null,
     };
 
-    session.timerId = window.setTimeout(() => {
-      if (dragRef.current !== session) return;
-      session.activated = true;
-      session.moved = true;
-      suppressClickIdRef.current = pointId;
-      pushHistory();
-      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-        try { navigator.vibrate(18); } catch { /* ignore */ }
-      }
-      setZHud({ pointId, x: pos[0], y: pos[1], z: pos[2], mode: 'adjust' });
-    }, 200);
+    if (!isComputed) {
+      session.timerId = window.setTimeout(() => {
+        if (dragRef.current !== session) return;
+        session.activated = true;
+        session.moved = true;
+        suppressClickIdRef.current = pointId;
+        pushHistory();
+        if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+          try { navigator.vibrate(18); } catch { /* ignore */ }
+        }
+        setZHud({ pointId, x: pos[0], y: pos[1], z: pos[2], mode: 'adjust' });
+      }, 220);
+    }
 
     dragRef.current = session;
   };
@@ -1162,13 +1551,29 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
         showLabels={view.showLabels}
       />
 
-      {/* Interactive horizontal ground plane when placing 3D points (press & drag up/down to set Z!) */}
-      {activeTool3D === 'point' && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} onPointerDown={handleGroundPointerDown}>
+      {/* Interactive horizontal ground plane for placing points & clicking directly in construction tools */}
+      {activeTool3D !== 'select' && (
+        <mesh
+          rotation={[-Math.PI / 2, 0, 0]}
+          position={[0, 0, 0]}
+          onPointerDown={handleGroundPointerDown}
+          onPointerMove={handleGroundPointerMove}
+          onPointerOut={() => setHoverGroundPos(null)}
+        >
           <planeGeometry args={[28, 28]} />
           <meshBasicMaterial transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
         </mesh>
       )}
+
+      {/* Live rubber-band & 3D ghost solid construction preview */}
+      <ConstructionPreview3D
+        activeTool3D={activeTool3D}
+        pendingIds={pendingIds}
+        ptMap={ptMap}
+        hoveredPointId={hoveredPointId}
+        hoverGroundPos={hoverGroundPos}
+        isDark={isDark}
+      />
 
       {/* Active live Z-elevation visual guide rail & ground drop-line */}
       {zHud && <ZElevationGuide hud={zHud} isDark={isDark} />}
@@ -1487,7 +1892,7 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
         return null;
       })}
 
-      {/* 3D Points with generous invisible touch hitboxes & press-and-hold Z elevation */}
+      {/* 3D Points with vivid hover glow, instant construction clicking & press-and-hold Z elevation */}
       {scene3d.points.map((pt) => {
         if (!pt.visible) return null;
         const pos = ptMap.get(pt.id) ?? [pt.x, pt.y, pt.z];
@@ -1495,66 +1900,112 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
         const isSel = selection.some((x) => x.domain === '3d' && x.type === 'point' && x.id === pt.id);
         const isPending = pendingIds.includes(pt.id);
         const isDraggingZ = zHud?.pointId === pt.id;
+        const isHover = hoveredPointId === pt.id;
         return (
           <group key={pt.id}>
-            {/* Subtle elevation drop-line when selected and off ground plane */}
-            {isSel && !isDraggingZ && Math.abs(pos[2]) > 0.05 && (
+            {/* Subtle elevation drop-line when selected or hovered and off ground plane */}
+            {(isSel || isHover) && !isDraggingZ && Math.abs(pos[2]) > 0.05 && (
               <Line
                 points={[mathToScene([pos[0], pos[1], 0]), scenePos]}
-                color="#1D5CE5"
-                lineWidth={1.3}
+                color={isHover ? '#0284C7' : '#1D5CE5'}
+                lineWidth={isHover ? 1.7 : 1.3}
                 dashed
                 dashSize={0.14}
                 gapSize={0.1}
                 transparent
-                opacity={0.55}
+                opacity={isHover ? 0.75 : 0.55}
               />
             )}
 
             <group position={scenePos}>
-              {/* Generous invisible hit sphere for effortless finger & mouse grab */}
+              {/* Generous invisible hit sphere for effortless finger & mouse picking */}
               <mesh
-                onPointerDown={(e) => handleExistingPointPointerDown(e, pt.id, pos, Boolean(pt.computed))}
+                onPointerOver={(e) => {
+                  e.stopPropagation();
+                  setHoveredPointId(pt.id);
+                  document.body.style.cursor = 'pointer';
+                }}
+                onPointerOut={() => {
+                  setHoveredPointId((cur) => (cur === pt.id ? null : cur));
+                  document.body.style.cursor = 'auto';
+                }}
+                onPointerDown={(e) => handlePointHitboxPointerDown(e, pt.id, pos, Boolean(pt.computed))}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (suppressClickIdRef.current === pt.id) return;
                   handlePoint3DClick(pt.id, e.shiftKey || e.ctrlKey || e.metaKey);
                 }}
               >
-                <sphereGeometry args={[0.28, 12, 12]} />
+                <sphereGeometry args={[0.34, 14, 14]} />
                 <meshBasicMaterial transparent opacity={0} depthWrite={false} />
               </mesh>
 
-              {/* Visible point sphere */}
+              {/* Visible core point sphere (scales up & brightens on hover) */}
               <mesh>
-                <sphereGeometry args={[isDraggingZ ? 0.14 : isSel || isPending ? 0.125 : 0.095, 18, 18]} />
+                <sphereGeometry
+                  args={[
+                    isDraggingZ
+                      ? 0.145
+                      : isHover
+                      ? 0.14
+                      : isSel || isPending
+                      ? 0.125
+                      : 0.095,
+                    18,
+                    18,
+                  ]}
+                />
                 <meshStandardMaterial
-                  color={isDraggingZ ? '#E06D1F' : isPending ? '#E06D1F' : isSel ? '#1D5CE5' : pt.color}
+                  color={
+                    isDraggingZ
+                      ? '#E06D1F'
+                      : isPending
+                      ? '#E06D1F'
+                      : isHover
+                      ? '#0284C7'
+                      : isSel
+                      ? '#1D5CE5'
+                      : pt.color
+                  }
+                  emissive={isHover ? '#0284C7' : isPending ? '#E06D1F' : '#000000'}
+                  emissiveIntensity={isHover ? 0.55 : isPending ? 0.35 : 0}
                 />
               </mesh>
 
-              {(isSel || isPending || isDraggingZ) && (
-                <mesh>
-                  <sphereGeometry args={[isDraggingZ ? 0.23 : 0.18, 16, 16]} />
-                  <meshBasicMaterial
-                    color={isDraggingZ || isPending ? '#E06D1F' : '#1D5CE5'}
-                    transparent
-                    opacity={isDraggingZ ? 0.3 : 0.22}
-                  />
-                </mesh>
+              {/* Vivid multi-layer outer glow halo when hovered, selected, pending, or dragging Z */}
+              {(isHover || isSel || isPending || isDraggingZ) && (
+                <>
+                  <mesh>
+                    <sphereGeometry args={[isDraggingZ || isHover ? 0.24 : 0.19, 16, 16]} />
+                    <meshBasicMaterial
+                      color={isDraggingZ || isPending ? '#E06D1F' : isHover ? '#38BDF8' : '#1D5CE5'}
+                      transparent
+                      opacity={isHover ? 0.42 : isDraggingZ ? 0.32 : 0.24}
+                      depthWrite={false}
+                    />
+                  </mesh>
+                  {isHover && (
+                    <mesh>
+                      <sphereGeometry args={[0.31, 16, 16]} />
+                      <meshBasicMaterial color="#0EA5E9" transparent opacity={0.18} depthWrite={false} />
+                    </mesh>
+                  )}
+                </>
               )}
 
               {view.showLabels && pt.showLabel && (
-                <Label3D position={[0.15, 0.23, 0]}>
+                <Label3D position={[0.16, 0.24, 0]}>
                   <span
-                    className={`pointer-events-none select-none whitespace-nowrap rounded px-1 text-xs font-bold ${
-                      isDraggingZ
-                        ? 'bg-[#E06D1F] text-white'
+                    className={`pointer-events-none select-none whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-bold transition-transform ${
+                      isDraggingZ || isPending
+                        ? 'scale-110 bg-[#E06D1F] text-white ring-2 ring-amber-300 shadow-sm'
+                        : isHover
+                        ? 'scale-110 bg-[#0284C7] text-white ring-2 ring-sky-300 shadow-sm'
                         : isSel
                         ? 'bg-[#1D5CE5] text-white'
                         : isDark
-                        ? 'bg-slate-900/75 text-slate-100'
-                        : 'bg-white/85 text-[#0F1B2D]'
+                        ? 'bg-slate-900/80 text-slate-100'
+                        : 'bg-white/90 text-[#0F1B2D]'
                     }`}
                   >
                     {pt.name}

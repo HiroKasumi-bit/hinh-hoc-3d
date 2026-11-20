@@ -126,7 +126,7 @@ export const Canvas2D: React.FC = () => {
   const findHitPoint = useCallback(
     (sx: number, sy: number): string | null => {
       let bestId: string | null = null;
-      let bestDist = 14;
+      let bestDist = 18;
       for (const p of scene2d.points) {
         if (!p.visible) continue;
         const pos = ptMap.get(p.id) ?? [p.x, p.y];
@@ -769,30 +769,38 @@ export const Canvas2D: React.FC = () => {
       }
     }
 
-    // 12. Pending polygon preview
-    if (activeTool2D === 'polygon' && pendingIds.length > 0) {
+    // 12. Live rubber-band preview for active 2D construction tools
+    if (activeTool2D !== 'select' && activeTool2D !== 'point' && pendingIds.length > 0) {
       const pts = pendingIds.map((id) => ptMap.get(id)).filter((p): p is Vec2 => Boolean(p));
-      if (pts.length > 0) {
+      const targetWorld: Vec2 | null = hoverPointId ? ptMap.get(hoverPointId) ?? hoverWorld : hoverWorld;
+      if (pts.length > 0 && targetWorld) {
         ctx.save();
-        ctx.strokeStyle = '#1D5CE5';
-        ctx.setLineDash([5, 4]);
-        ctx.lineWidth = 1.8;
-        ctx.beginPath();
-        pts.forEach((p, idx) => {
-          const [sx, sy] = worldToScreen(p[0], p[1]);
-          if (idx === 0) ctx.moveTo(sx, sy);
-          else ctx.lineTo(sx, sy);
-        });
-        if (hoverWorld) {
-          const [hx, hy] = worldToScreen(hoverWorld[0], hoverWorld[1]);
+        ctx.strokeStyle = '#0284C7';
+        ctx.setLineDash([6, 4]);
+        ctx.lineWidth = 2.2;
+
+        if (activeTool2D === 'circle' && pts.length === 1) {
+          const [cx, cy] = worldToScreen(pts[0][0], pts[0][1]);
+          const r = dist2D(pts[0], targetWorld) * cam.scale;
+          ctx.beginPath();
+          ctx.arc(cx, cy, Math.max(1, r), 0, Math.PI * 2);
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          pts.forEach((p, idx) => {
+            const [sx, sy] = worldToScreen(p[0], p[1]);
+            if (idx === 0) ctx.moveTo(sx, sy);
+            else ctx.lineTo(sx, sy);
+          });
+          const [hx, hy] = worldToScreen(targetWorld[0], targetWorld[1]);
           ctx.lineTo(hx, hy);
+          ctx.stroke();
         }
-        ctx.stroke();
         ctx.restore();
       }
     }
 
-    // 13. Points (drawn last so always crisp & clickable on top)
+    // 13. Points (drawn last so always crisp & clickable on top, with vivid hover glow!)
     for (const pt of scene2d.points) {
       if (!pt.visible) continue;
       const pos = ptMap.get(pt.id) ?? [pt.x, pt.y];
@@ -802,28 +810,38 @@ export const Canvas2D: React.FC = () => {
       const isHover = hoverPointId === pt.id;
 
       ctx.save();
-      if (isSelected || isPending || isHover) {
+      if (isHover) {
         ctx.beginPath();
-        ctx.arc(sx, sy, isSelected || isPending ? 10 : 8.5, 0, Math.PI * 2);
-        ctx.fillStyle = isPending ? 'rgba(224, 109, 31, 0.24)' : 'rgba(29, 92, 229, 0.22)';
+        ctx.arc(sx, sy, 14, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(14, 165, 233, 0.22)';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(sx, sy, 9.5, 0, Math.PI * 2);
+        ctx.strokeStyle = '#0284C7';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      } else if (isSelected || isPending) {
+        ctx.beginPath();
+        ctx.arc(sx, sy, 11, 0, Math.PI * 2);
+        ctx.fillStyle = isPending ? 'rgba(224, 109, 31, 0.28)' : 'rgba(29, 92, 229, 0.24)';
         ctx.fill();
       }
       ctx.beginPath();
-      ctx.arc(sx, sy, pt.computed ? 4.8 : 5.5, 0, Math.PI * 2);
-      ctx.fillStyle = pt.color;
+      ctx.arc(sx, sy, isHover ? 7 : isPending || isSelected ? 6.2 : pt.computed ? 4.8 : 5.5, 0, Math.PI * 2);
+      ctx.fillStyle = isPending ? '#E06D1F' : isHover ? '#0284C7' : pt.color;
       ctx.fill();
       ctx.lineWidth = 2;
       ctx.strokeStyle = isDark ? '#0D131F' : '#FFFFFF';
       ctx.stroke();
 
       if (view.showLabels && pt.showLabel) {
-        ctx.font = '600 12.5px "Be Vietnam Pro", sans-serif';
+        ctx.font = isHover || isPending ? '700 13px "Be Vietnam Pro", sans-serif' : '600 12.5px "Be Vietnam Pro", sans-serif';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'bottom';
         ctx.lineWidth = 3.5;
         ctx.strokeStyle = bgColor;
         ctx.strokeText(pt.name, sx + 8, sy - 6);
-        ctx.fillStyle = textInk;
+        ctx.fillStyle = isPending ? '#E06D1F' : isHover ? '#0284C7' : textInk;
         ctx.fillText(pt.name, sx + 8, sy - 6);
       }
       ctx.restore();
@@ -1003,6 +1021,8 @@ export const Canvas2D: React.FC = () => {
               ? 'grabbing'
               : hoverPointId && activeTool2D === 'select'
               ? 'grab'
+              : hoverPointId
+              ? 'pointer'
               : activeTool2D === 'select'
               ? 'default'
               : 'crosshair',

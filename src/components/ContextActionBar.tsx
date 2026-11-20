@@ -19,7 +19,10 @@ const TOOL_2D_HINTS: Record<string, string> = {
 
 const TOOL_3D_HINTS: Record<string, string> = {
   point: 'Chạm mặt phẳng để đặt điểm · Nhấn giữ và kéo lên/xuống để nâng độ cao z',
-  segment: 'Chạm lần lượt 2 điểm để nối đoạn thẳng',
+  segment: 'Chạm lần lượt 2 điểm (hoặc chấm lên mặt phẳng) để nối đoạn thẳng',
+  tetrahedron3d: 'Chạm 3 điểm A → B → C để dựng ngay Chóp tứ diện S.ABC (nhấn giữ bước 3 để kéo cao độ S)',
+  pyramid4_3d: 'Chạm 2 điểm cạnh đáy A → B rồi chạm điểm thứ 3 để dựng ngay Chóp tứ giác S.ABCD',
+  box3d: "Chạm 2 điểm cạnh đáy A → B để dựng ngay Khối hộp / Lập phương ABCD.A'B'C'D'",
   line: 'Chạm 2 điểm để dựng đường thẳng không gian',
   vector: 'Chạm điểm gốc rồi điểm ngọn để vẽ vectơ 3D',
   plane3p: 'Chạm 3 điểm không thẳng hàng để dựng mặt phẳng (ABC)',
@@ -52,6 +55,9 @@ export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) 
   const createMidpointFromSelection = useGeometryStore((s) => s.createMidpointFromSelection);
   const createRatioPointFromSelection = useGeometryStore((s) => s.createRatioPointFromSelection);
   const createPlaneFrom3SelectedPoints = useGeometryStore((s) => s.createPlaneFrom3SelectedPoints);
+  const createTetrahedronFromSelection = useGeometryStore((s) => s.createTetrahedronFromSelection);
+  const createPyramid4FromSelection = useGeometryStore((s) => s.createPyramid4FromSelection);
+  const createCubeFromSelection = useGeometryStore((s) => s.createCubeFromSelection);
   const createCrossSectionFromSelection = useGeometryStore((s) => s.createCrossSectionFromSelection);
   const createFootOnPlaneFromSelection = useGeometryStore((s) => s.createFootOnPlaneFromSelection);
   const createReflectAcrossPlaneFromSelection = useGeometryStore((s) => s.createReflectAcrossPlaneFromSelection);
@@ -128,6 +134,8 @@ export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) 
     if (pts.length === 2 && planes.length === 0) {
       actions.push(
         { label: 'Nối đoạn thẳng', onClick: () => createSegmentFromSelection('3d'), accent: true },
+        { label: 'Dựng Chóp tứ giác', onClick: () => createPyramid4FromSelection(), accent: true },
+        { label: 'Dựng Khối hộp', onClick: () => createCubeFromSelection(), accent: true },
         { label: 'Đường thẳng', onClick: () => createLineFromSelection('3d') },
         { label: 'Vectơ', onClick: () => createVectorFromSelection('3d') },
         { label: 'Trung điểm', onClick: () => createMidpointFromSelection('3d') },
@@ -136,6 +144,7 @@ export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) 
       );
     } else if (pts.length === 3) {
       actions.push(
+        { label: 'Dựng Chóp tứ diện S.ABC', onClick: () => createTetrahedronFromSelection(), accent: true },
         { label: 'Dựng mặt phẳng', onClick: () => createPlaneFrom3SelectedPoints(), accent: true },
         { label: 'Cắt thiết diện', onClick: () => createCrossSectionFromSelection(), accent: true },
         { label: 'Đo góc ∠', onClick: () => createAngleMeasureFromSelection('3d') }

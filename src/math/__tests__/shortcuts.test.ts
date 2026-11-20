@@ -61,4 +61,45 @@ describe('Customizable Keyboard Shortcuts & Point Renaming', () => {
     expect(useGeometryStore.getState().scene3d.points.find((p) => p.id === idA)?.name).toBe('A');
     expect(useGeometryStore.getState().scene3d.segments[0].name).toBe('AB');
   });
+
+  it('constructs 3D Tetrahedron S.ABC directly from 3 points or 3 ground clicks', () => {
+    const store = useGeometryStore.getState();
+    store.setTool3D('tetrahedron3d');
+    store.handleGround3DConstructionClick([0, 0, 0]);
+    store.handleGround3DConstructionClick([3, 0, 0]);
+    const apexId = store.handleGround3DConstructionClick([1.5, 2.5, 0]);
+
+    expect(apexId).toBeTruthy();
+    const s3 = useGeometryStore.getState().scene3d;
+    expect(s3.points.length).toBe(4); // A, B, C, S
+    expect(s3.polyhedra.length).toBe(1);
+    expect(s3.polyhedra[0].kind).toBe('tetrahedron');
+    expect(s3.polyhedra[0].faces.length).toBe(4);
+  });
+
+  it('pre-fills 2 existing/connected points so the 3rd click immediately constructs a 3D Pyramid S.ABCD', () => {
+    const store = useGeometryStore.getState();
+    const idA = store.addPoint3D(0, 0, 0, 'A');
+    const idB = store.addPoint3D(3, 0, 0, 'B');
+    useGeometryStore.setState({
+      selection: [
+        { domain: '3d', type: 'point', id: idA },
+        { domain: '3d', type: 'point', id: idB },
+      ],
+    });
+    store.createSegmentFromSelection('3d');
+
+    // Now switch to pyramid4_3d -> should automatically pre-fill [idA, idB]
+    useGeometryStore.getState().setTool3D('pyramid4_3d');
+    expect(useGeometryStore.getState().pendingIds).toEqual([idA, idB]);
+
+    // 3rd click places apex S and builds the 5-face pyramid S.ABCD immediately!
+    const sId = useGeometryStore.getState().handleGround3DConstructionClick([1.5, 1.5, 3.5]);
+    expect(sId).toBeTruthy();
+    const s3 = useGeometryStore.getState().scene3d;
+    expect(s3.points.length).toBe(5); // A, B, C, D, S
+    expect(s3.polyhedra.length).toBe(1);
+    expect(s3.polyhedra[0].kind).toBe('pyramid');
+    expect(s3.polyhedra[0].faces.length).toBe(5);
+  });
 });

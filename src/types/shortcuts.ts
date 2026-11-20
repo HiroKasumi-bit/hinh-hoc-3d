@@ -5,6 +5,9 @@ export type ShortcutActionId =
   | 'tool_segment'
   | 'tool_line'
   | 'tool_vector'
+  | 'tool_tetrahedron3d'
+  | 'tool_pyramid4_3d'
+  | 'tool_box3d'
   | 'tool_midpoint'
   | 'tool_plane_or_polygon'
   | 'tool_section_or_perp'
@@ -42,6 +45,9 @@ export const DEFAULT_SHORTCUTS: ShortcutMap = {
   tool_segment: 'S',
   tool_line: 'L',
   tool_vector: 'U',
+  tool_tetrahedron3d: 'Y',
+  tool_pyramid4_3d: 'E',
+  tool_box3d: 'W',
   tool_midpoint: 'M',
   tool_plane_or_polygon: 'F',
   tool_section_or_perp: 'X',
@@ -115,6 +121,24 @@ export const SHORTCUT_META: ShortcutMeta[] = [
     category: 'tools',
     label: 'Vẽ vectơ',
     description: 'Dựng vectơ từ điểm gốc đến điểm ngọn',
+  },
+  {
+    id: 'tool_tetrahedron3d',
+    category: 'tools',
+    label: 'Dựng Tứ diện / Chóp tam giác (3 điểm)',
+    description: 'Chấm hoặc chọn 3 điểm A → B → C là tự dựng ngay khối tứ diện S.ABC (nhấn giữ bước 3 để kéo chiều cao S)',
+  },
+  {
+    id: 'tool_pyramid4_3d',
+    category: 'tools',
+    label: 'Dựng Chóp tứ giác (2 điểm đáy + đỉnh S)',
+    description: 'Chấm 2 điểm A → B tạo đáy vuông ABCD, điểm thứ 3 đặt đỉnh S ra ngay hình chóp S.ABCD',
+  },
+  {
+    id: 'tool_box3d',
+    category: 'tools',
+    label: 'Dựng Khối hộp / Lập phương (2 điểm + cao)',
+    description: 'Chấm 2 điểm A → B tạo đáy vuông ABCD, bước 3 chọn chiều cao ra ngay khối hộp ABCD.A′B′C′D′',
   },
   {
     id: 'tool_midpoint',
