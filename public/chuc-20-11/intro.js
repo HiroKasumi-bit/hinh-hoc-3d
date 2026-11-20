@@ -122,13 +122,13 @@
     '<figure class="k-photo" role="img" aria-label="Ảnh cô Hạnh">' + slices + '</figure>' +
     '<div class="k-copy">' +
     '<p class="k-eyebrow">20.11.2026 — Ngày Nhà giáo Việt Nam</p>' +
-    '<h1 class="k-title" id="k-title"><span class="k-line">' + words('Gửi cô') + '</span><span class="k-line k-name">' + words('Hạnh') + '</span></h1>' +
+    '<h1 class="k-title" id="k-title"><span class="k-line">' + words('Chúc cô') + '</span><span class="k-line k-name">' + words('Hẹnh') + '</span></h1>' +
     '<ul class="k-wishes">' +
     '<li>Thật nhiều <b>sức khoẻ</b>.</li>' +
     '<li>Thật nhiều <b>niềm vui</b>.</li>' +
     '<li>Thật nhiều <b>cảm hứng</b>.</li>' +
     '</ul>' +
-    '<p class="k-thanks">Cảm ơn cô vì tất cả.</p>' +
+    '<p class="k-thanks">Thén kìu tích chờ</p>' +
     '<div class="k-actions">' +
     '<button type="button" class="k-enter">Vào HìnhHọcViệt <span aria-hidden="true">→</span></button>' +
     '<button type="button" class="k-replay">Xem lại</button>' +
@@ -247,8 +247,8 @@
   function loadFonts() {
     if (!document.fonts || !document.fonts.load) return Promise.resolve();
     return Promise.all([
-      document.fonts.load('900 120px Phudu', 'CHÚC MỪNG NGÀY NHÀ GIÁO VIỆT NAM GỬI CÔ HẠNH 20.11'),
-      document.fonts.load('400 24px "Be Vietnam Pro"', 'Thật nhiều sức khoẻ niềm vui cảm hứng Cảm ơn cô vì tất cả'),
+      document.fonts.load('900 120px Phudu', 'CHÚC MỪNG NGÀY NHÀ GIÁO VIỆT NAM CHÚC CÔ HẸNH 20.11'),
+      document.fonts.load('400 24px "Be Vietnam Pro"', 'Thật nhiều sức khoẻ niềm vui cảm hứng Thén kìu tích chờ'),
       document.fonts.load('600 15px "Be Vietnam Pro"', 'Vào HìnhHọcViệt Xem lại'),
       document.fonts.load('700 24px "Be Vietnam Pro"', 'sức khoẻ niềm vui cảm hứng Mở lời chúc'),
       document.fonts.load('500 12px "JetBrains Mono"', 'NGÀY NHÀ GIÁO VIỆT NAM 20.11.2026'),
