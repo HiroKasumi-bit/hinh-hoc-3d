@@ -24,6 +24,7 @@ import {
   len3,
   mathToScene,
   normalize3,
+  pickMagneticPoint3D,
   planeBasis,
   planeFrom3Points,
   resolvePlaneEq,
@@ -48,12 +49,20 @@ import type {
   Vec3,
 } from '../types/geometry';
 
-/** Keep Drei Html labels strictly below modals (z-[100]) by capping zIndexRange to [10, 0] */
-const Label3D: React.FC<{ position: [number, number, number]; children: React.ReactNode }> = ({
-  position,
-  children,
-}) => (
-  <Html position={position} center zIndexRange={[10, 0]}>
+/** Keep Drei Html labels strictly below modals (z-[100]) and pass pointer events through unless interactive */
+const Label3D: React.FC<{
+  position: [number, number, number];
+  children: React.ReactNode;
+  interactive?: boolean;
+}> = ({ position, children, interactive = false }) => (
+  <Html
+    position={position}
+    center
+    zIndexRange={[10, 0]}
+    wrapperClass={interactive ? undefined : 'pointer-events-none'}
+    pointerEvents={interactive ? 'auto' : 'none'}
+    style={{ pointerEvents: interactive ? 'auto' : 'none' }}
+  >
     {children}
   </Html>
 );
@@ -1155,7 +1164,57 @@ const ConstructionPreview3D: React.FC<{
   hoverGroundPos: Vec3 | null;
   snapToGrid: boolean;
   isDark: boolean;
-}> = ({ activeTool3D, segment3DMode, pendingIds, closedBase3D, ptMap, hoveredPointId, hoverGroundPos, snapToGrid, isDark }) => {
+  onCloseBase?: () => void;
+}> = ({
+  activeTool3D,
+  segment3DMode,
+  pendingIds,
+  closedBase3D,
+  ptMap,
+  hoveredPointId,
+  hoverGroundPos,
+  snapToGrid,
+  isDark,
+  onCloseBase,
+}) => {
+  const isPolyTool =
+    activeTool3D === 'pyramid' ||
+    activeTool3D === 'prism' ||
+    activeTool3D === 'extrudePyramid' ||
+    activeTool3D === 'extrudePrism';
+  const pendingPts = pendingIds.map((id) => ptMap.get(id)).filter((p): p is Vec3 => Boolean(p));
+  const closedBasePts = closedBase3D.map((id) => ptMap.get(id)).filter((p): p is Vec3 => Boolean(p));
+  const isSnappingToClose = isPolyTool && closedBasePts.length === 0 && pendingPts.length >= 3 && hoveredPointId === pendingIds[0];
+
+  const closeTargetRingPts = useMemo(() => {
+    if (!isPolyTool || closedBasePts.length > 0 || pendingPts.length < 3) return null;
+    const anchor = pendingPts[0];
+    const r = isSnappingToClose ? 0.5 : 0.38;
+    const pts: Array<[number, number, number]> = [];
+    for (let i = 0; i <= 24; i++) {
+      const t = (i / 24) * Math.PI * 2;
+      pts.push(mathToScene([anchor[0] + r * Math.cos(t), anchor[1] + r * Math.sin(t), anchor[2] + 0.025]));
+    }
+    return pts;
+  }, [isPolyTool, closedBasePts.length, pendingPts, isSnappingToClose]);
+
+  const snapBaseFillGeo = useMemo(() => {
+    if (!isSnappingToClose || pendingPts.length < 3) return null;
+    const verts: number[] = [];
+    const p0 = mathToScene(pendingPts[0]);
+    for (let i = 1; i + 1 < pendingPts.length; i++) {
+      const p1 = mathToScene(pendingPts[i]);
+      const p2 = mathToScene(pendingPts[i + 1]);
+      verts.push(p0[0], p0[1] + 0.012, p0[2], p1[0], p1[1] + 0.012, p1[2], p2[0], p2[1] + 0.012, p2[2]);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    geo.computeVertexNormals();
+    return geo;
+  }, [isSnappingToClose, pendingPts]);
+
+  useEffect(() => () => snapBaseFillGeo?.dispose(), [snapBaseFillGeo]);
+
   if (activeTool3D === 'select') return null;
 
   const targetPos: Vec3 | null = hoveredPointId ? ptMap.get(hoveredPointId) ?? hoverGroundPos : hoverGroundPos;
@@ -1170,9 +1229,6 @@ const ConstructionPreview3D: React.FC<{
     }
     return pts;
   }, [hoverGroundPos, hoveredPointId]);
-
-  const pendingPts = pendingIds.map((id) => ptMap.get(id)).filter((p): p is Vec3 => Boolean(p));
-  const closedBasePts = closedBase3D.map((id) => ptMap.get(id)).filter((p): p is Vec3 => Boolean(p));
 
   const renderToolPreview = () => {
     // 0. GeoGebra 2-Click Tetrahedron & Cube Previews
@@ -1284,15 +1340,54 @@ const ConstructionPreview3D: React.FC<{
 
       if (pendingPts.length >= 1) {
         const polyPts = pendingPts.map(mathToScene);
-        if (targetPos) polyPts.push(mathToScene(targetPos));
+        if (isSnappingToClose) {
+          polyPts.push(mathToScene(pendingPts[0]));
+        } else if (targetPos) {
+          polyPts.push(mathToScene(targetPos));
+        }
         return (
           <group>
-            {polyPts.length >= 2 && <Line points={polyPts} color="#E06D1F" lineWidth={2.6} dashed dashSize={0.18} gapSize={0.1} />}
+            {snapBaseFillGeo && (
+              <mesh geometry={snapBaseFillGeo}>
+                <meshBasicMaterial color="#0E9F6E" transparent opacity={0.22} side={THREE.DoubleSide} depthWrite={false} />
+              </mesh>
+            )}
+            {polyPts.length >= 2 && (
+              <Line
+                points={polyPts}
+                color={isSnappingToClose ? '#0E9F6E' : '#E06D1F'}
+                lineWidth={isSnappingToClose ? 3.2 : 2.6}
+                dashed={!isSnappingToClose}
+                dashSize={0.18}
+                gapSize={0.1}
+              />
+            )}
+            {closeTargetRingPts && (
+              <Line
+                points={closeTargetRingPts}
+                color="#0E9F6E"
+                lineWidth={isSnappingToClose ? 3.2 : 2.2}
+              />
+            )}
             {pendingPts.length >= 3 && (
-              <Label3D position={mathToScene([pendingPts[0][0], pendingPts[0][1], pendingPts[0][2] + 0.42])}>
-                <span className="pointer-events-none select-none rounded bg-[#0E9F6E] px-1.5 py-0.5 text-[10px] font-bold text-white shadow-xs">
-                  Chạm lại để khép đáy
-                </span>
+              <Label3D
+                interactive
+                position={mathToScene([pendingPts[0][0], pendingPts[0][1], pendingPts[0][2] + 0.56])}
+              >
+                <button
+                  type="button"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    onCloseBase?.();
+                  }}
+                  className={`pointer-events-auto cursor-pointer select-none whitespace-nowrap rounded px-2 py-0.5 text-[10.5px] font-bold text-white shadow-md transition-transform ${
+                    isSnappingToClose
+                      ? 'scale-110 bg-[#059669] ring-2 ring-emerald-200'
+                      : 'bg-[#0E9F6E] hover:bg-[#059669]'
+                  }`}
+                >
+                  {isSnappingToClose ? 'Nhấn để khép đáy ✓' : 'Chạm lại để khép đáy'}
+                </button>
               </Label3D>
             )}
           </group>
@@ -1571,7 +1666,7 @@ const ConstructionPreview3D: React.FC<{
 // ==================== MAIN 3D SCENE CONTENT WITH PRESS-AND-HOLD Z ELEVATION ====================
 
 const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl | null> }> = ({ controlsRef }) => {
-  const { camera, size } = useThree();
+  const { camera, size, gl } = useThree();
   const scene3d = useGeometryStore((s) => s.scene3d);
   const sliders = useGeometryStore((s) => s.sliders);
   const view = useGeometryStore((s) => s.view);
@@ -1592,12 +1687,24 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
 
   const isDark = view.theme === 'dark';
 
-  // Hover state for vivid point glow & live construction preview
-  const [hoveredPointId, setHoveredPointId] = useState<string | null>(null);
+  // Separate hitbox hover vs ground magnetic hover so crossing sphere/ground boundary never flickers!
+  const [hitboxHoverPointId, setHitboxHoverPointId] = useState<string | null>(null);
+  const [magneticHoverPointId, setMagneticHoverPointId] = useState<string | null>(null);
+  const hoveredPointId = hitboxHoverPointId ?? magneticHoverPointId;
   const [hoverGroundPos, setHoverGroundPos] = useState<Vec3 | null>(null);
+
+  const isPolygonClosingReady =
+    (activeTool3D === 'pyramid' ||
+      activeTool3D === 'prism' ||
+      activeTool3D === 'extrudePyramid' ||
+      activeTool3D === 'extrudePrism') &&
+    closedBase3D.length === 0 &&
+    pendingIds.length >= 3;
 
   useEffect(() => {
     setHoverGroundPos(null);
+    setMagneticHoverPointId(null);
+    setHitboxHoverPointId(null);
     return () => {
       document.body.style.cursor = 'auto';
     };
@@ -1806,21 +1913,33 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
 
   const snapGroundVal = (v: number) => (view.snapToGrid ? Math.round(v * 2) / 2 : Number(v.toFixed(2)));
 
-  // Find closest visible 3D point within magnetic snap tolerance
-  const findMagneticPointId = (groundPos: Vec3, radius = 0.38): string | null => {
-    if (hoveredPointId) return hoveredPointId;
-    let bestId: string | null = null;
-    let bestDist = radius;
-    for (const p of scene3d.points) {
-      if (!p.visible) continue;
-      const pos = ptMap.get(p.id) ?? [p.x, p.y, p.z];
-      const d = dist3(pos, groundPos);
-      if (d < bestDist) {
-        bestDist = d;
-        bestId = p.id;
-      }
-    }
-    return bestId;
+  // Screen-space + raw un-snapped world magnetic picker (prioritizes closing vertex A cleanly!)
+  const findMagneticPointFromEvent = (nativeEvent: PointerEvent, rawGroundPos?: Vec3 | null): string | null => {
+    const rect = gl.domElement.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    const pointerX = nativeEvent.clientX - rect.left;
+    const pointerY = nativeEvent.clientY - rect.top;
+    const candidates = scene3d.points
+      .filter((p) => p.visible)
+      .map((p) => {
+        const worldPos = ptMap.get(p.id) ?? [p.x, p.y, p.z];
+        const projected = new THREE.Vector3(...mathToScene(worldPos)).project(camera);
+        return {
+          id: p.id,
+          screenX: ((projected.x + 1) / 2) * rect.width,
+          screenY: ((-projected.y + 1) / 2) * rect.height,
+          worldPos,
+        };
+      });
+
+    return pickMagneticPoint3D({
+      candidates,
+      pointerX,
+      pointerY,
+      rawGroundPos,
+      priorityCloseId: isPolygonClosingReady ? pendingIds[0] : null,
+      isTouch: nativeEvent.pointerType === 'touch',
+    });
   };
 
   // Ground plane interaction for both 'point' tool and all 3D construction tools!
@@ -1829,26 +1948,29 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
     if (e.nativeEvent.button !== 0 && e.nativeEvent.pointerType === 'mouse') return;
     e.stopPropagation();
 
-    const m = sceneToMath([e.point.x, e.point.y, e.point.z]);
-    const x = snapGroundVal(m[0]);
-    const y = snapGroundVal(m[1]);
+    const rawMath = sceneToMath([e.point.x, e.point.y, e.point.z]);
+    const rawGroundPos: Vec3 = [rawMath[0], rawMath[1], 0];
 
     if (activeTool3D === 'point') {
+      const x = snapGroundVal(rawMath[0]);
+      const y = snapGroundVal(rawMath[1]);
       const newId = addPoint3D(x, y, 0);
       selectItem({ domain: '3d', type: 'point', id: newId }, false);
       attachCreateZDrag({ pointIds: [newId], anchor: [x, y, 0], baseZ: 0, label: 'z' }, e.nativeEvent, true);
       return;
     }
 
-    // In construction tools: if pointer is near an existing point, snap magnetically to it!
-    const nearId = findMagneticPointId([x, y, 0]);
+    // Check magnetic point capture BEFORE snapping to grid so clicks on/near point A never drift to a neighbor cell!
+    const nearId = hitboxHoverPointId ?? findMagneticPointFromEvent(e.nativeEvent, rawGroundPos);
     if (nearId) {
       const dragTarget = handlePoint3DClick(nearId, false);
       if (dragTarget) attachCreateZDrag(dragTarget, e.nativeEvent, false);
       return;
     }
 
-    // Otherwise auto-create a vertex at (x, y, 0) and advance the active construction tool!
+    // Otherwise snap to grid and auto-create vertex on ground plane
+    const x = snapGroundVal(rawMath[0]);
+    const y = snapGroundVal(rawMath[1]);
     const dragTarget = handleGround3DConstructionClick([x, y, 0]);
     if (dragTarget) {
       attachCreateZDrag(dragTarget, e.nativeEvent, false);
@@ -1857,8 +1979,14 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
 
   const handleGroundPointerMove = (e: ThreeEvent<PointerEvent>) => {
     if (activeTool3D === 'select') return;
-    const m = sceneToMath([e.point.x, e.point.y, e.point.z]);
-    setHoverGroundPos([snapGroundVal(m[0]), snapGroundVal(m[1]), 0]);
+    const rawMath = sceneToMath([e.point.x, e.point.y, e.point.z]);
+    const rawGroundPos: Vec3 = [rawMath[0], rawMath[1], 0];
+    const magId = findMagneticPointFromEvent(e.nativeEvent, rawGroundPos);
+    setMagneticHoverPointId(magId);
+    if (!hitboxHoverPointId) {
+      document.body.style.cursor = magId ? 'pointer' : 'crosshair';
+    }
+    setHoverGroundPos([snapGroundVal(rawMath[0]), snapGroundVal(rawMath[1]), 0]);
   };
 
   // Point hitbox pointerdown: instant response in construction tools, or tap/hold-Z in select/point tools!
@@ -1987,7 +2115,10 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
           position={[0, 0, 0]}
           onPointerDown={handleGroundPointerDown}
           onPointerMove={handleGroundPointerMove}
-          onPointerOut={() => setHoverGroundPos(null)}
+          onPointerOut={() => {
+            setHoverGroundPos(null);
+            setMagneticHoverPointId(null);
+          }}
         >
           <planeGeometry args={[28, 28]} />
           <meshBasicMaterial transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
@@ -2005,6 +2136,11 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
         hoverGroundPos={hoverGroundPos}
         snapToGrid={view.snapToGrid}
         isDark={isDark}
+        onCloseBase={() => {
+          if (pendingIds[0]) {
+            handlePoint3DClick(pendingIds[0], false);
+          }
+        }}
       />
 
       {/* Active live Z-elevation visual guide rail & ground drop-line */}
@@ -2358,6 +2494,7 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
         const isPending = pendingIds.includes(pt.id);
         const isDraggingZ = zHud?.pointId === pt.id;
         const isHover = hoveredPointId === pt.id;
+        const isCloseTarget = isPolygonClosingReady && pt.id === pendingIds[0];
         return (
           <group key={pt.id}>
             {/* Full Oxyz coordinate drop-lines when Oxyz axes are visible and point is hovered/selected/dragged */}
@@ -2434,30 +2571,36 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
               <mesh
                 onPointerOver={(e) => {
                   e.stopPropagation();
-                  setHoveredPointId(pt.id);
+                  setHitboxHoverPointId(pt.id);
                   document.body.style.cursor = 'pointer';
                 }}
                 onPointerOut={() => {
-                  setHoveredPointId((cur) => (cur === pt.id ? null : cur));
+                  setHitboxHoverPointId((cur) => (cur === pt.id ? null : cur));
                   document.body.style.cursor = 'auto';
                 }}
                 onPointerDown={(e) => handlePointHitboxPointerDown(e, pt.id, pos, Boolean(pt.computed))}
                 onClick={(e) => {
                   e.stopPropagation();
+                  // All construction tools already register immediately on pointerDown (no 150ms hold race!)
+                  if (activeTool3D !== 'select' && activeTool3D !== 'point') return;
                   if (suppressClickIdRef.current === pt.id) return;
                   handlePoint3DClick(pt.id, e.shiftKey || e.ctrlKey || e.metaKey);
                 }}
               >
-                <sphereGeometry args={[0.34, 14, 14]} />
+                <sphereGeometry args={[isCloseTarget ? 0.52 : 0.36, 14, 14]} />
                 <meshBasicMaterial transparent opacity={0} depthWrite={false} />
               </mesh>
 
-              {/* Visible core point sphere (scales up & brightens on hover) */}
+              {/* Visible core point sphere (scales up & brightens on hover or close-base target) */}
               <mesh>
                 <sphereGeometry
                   args={[
                     isDraggingZ
                       ? 0.145
+                      : isCloseTarget && isHover
+                      ? 0.165
+                      : isCloseTarget
+                      ? 0.14
                       : isHover
                       ? 0.14
                       : isSel || isPending
@@ -2471,6 +2614,8 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
                   color={
                     isDraggingZ
                       ? '#E06D1F'
+                      : isCloseTarget
+                      ? '#0E9F6E'
                       : isPending
                       ? '#E06D1F'
                       : isHover
@@ -2479,27 +2624,27 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
                       ? '#1D5CE5'
                       : pt.color
                   }
-                  emissive={isHover ? '#0284C7' : isPending ? '#E06D1F' : '#000000'}
-                  emissiveIntensity={isHover ? 0.55 : isPending ? 0.35 : 0}
+                  emissive={isCloseTarget ? '#0E9F6E' : isHover ? '#0284C7' : isPending ? '#E06D1F' : '#000000'}
+                  emissiveIntensity={isCloseTarget && isHover ? 0.75 : isCloseTarget ? 0.45 : isHover ? 0.55 : isPending ? 0.35 : 0}
                 />
               </mesh>
 
-              {/* Vivid multi-layer outer glow halo when hovered, selected, pending, or dragging Z */}
-              {(isHover || isSel || isPending || isDraggingZ) && (
+              {/* Vivid multi-layer outer glow halo when hovered, selected, pending, close-target, or dragging Z */}
+              {(isHover || isSel || isPending || isDraggingZ || isCloseTarget) && (
                 <>
                   <mesh>
-                    <sphereGeometry args={[isDraggingZ || isHover ? 0.24 : 0.19, 16, 16]} />
+                    <sphereGeometry args={[isDraggingZ || isHover || isCloseTarget ? 0.25 : 0.19, 16, 16]} />
                     <meshBasicMaterial
-                      color={isDraggingZ || isPending ? '#E06D1F' : isHover ? '#38BDF8' : '#1D5CE5'}
+                      color={isCloseTarget ? '#10B981' : isDraggingZ || isPending ? '#E06D1F' : isHover ? '#38BDF8' : '#1D5CE5'}
                       transparent
-                      opacity={isHover ? 0.42 : isDraggingZ ? 0.32 : 0.24}
+                      opacity={isCloseTarget && isHover ? 0.48 : isHover ? 0.42 : isDraggingZ || isCloseTarget ? 0.32 : 0.24}
                       depthWrite={false}
                     />
                   </mesh>
-                  {isHover && (
+                  {(isHover || isCloseTarget) && (
                     <mesh>
-                      <sphereGeometry args={[0.31, 16, 16]} />
-                      <meshBasicMaterial color="#0EA5E9" transparent opacity={0.18} depthWrite={false} />
+                      <sphereGeometry args={[isCloseTarget ? 0.35 : 0.31, 16, 16]} />
+                      <meshBasicMaterial color={isCloseTarget ? '#0E9F6E' : '#0EA5E9'} transparent opacity={isHover ? 0.24 : 0.14} depthWrite={false} />
                     </mesh>
                   )}
                 </>

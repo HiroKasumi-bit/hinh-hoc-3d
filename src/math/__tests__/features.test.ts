@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { parseSmartInput } from '../parser';
 import { evalDerivative2D, findFunctionIntersections2D } from '../geometry2d';
+import { pickMagneticPoint3D } from '../geometry3d';
 import { useGeometryStore } from '../../store/useGeometryStore';
 import { solveVietnameseMathProblem } from '../../../functions/_lib/problemEngine';
 import {
@@ -221,5 +222,43 @@ describe('GeoGebra 3D Solids, Oxyz Semicolons, Function Calculus & Problem Secur
     expect(fifth.lockedUntil).not.toBeNull();
     const blocked = await checkRateLimit(req, env);
     expect(blocked.allowed).toBe(false);
+  });
+
+  it('captures closing vertex cleanly by screen pixels and un-snapped distance in 3D', () => {
+    const candidates = [
+      { id: 'ptA', screenX: 400, screenY: 300, worldPos: [0, 0, 0] as [number, number, number] },
+      { id: 'ptD', screenX: 422, screenY: 304, worldPos: [0.4, 0.1, 0] as [number, number, number] },
+    ];
+
+    // Even when slightly offset below ptA (30px away) and closer to ptD in raw px, priorityCloseId wins
+    const closeHit = pickMagneticPoint3D({
+      candidates,
+      pointerX: 416,
+      pointerY: 325,
+      rawGroundPos: [0.3, 0.2, 0],
+      priorityCloseId: 'ptA',
+      isTouch: false,
+    });
+    expect(closeHit).toBe('ptA');
+
+    // Without priorityCloseId: picks closest point inside 24px radius, returns null outside
+    expect(
+      pickMagneticPoint3D({
+        candidates: [{ id: 'ptA', screenX: 400, screenY: 300, worldPos: [0, 0, 0] }],
+        pointerX: 415,
+        pointerY: 312,
+        isTouch: false,
+      })
+    ).toBe('ptA');
+
+    expect(
+      pickMagneticPoint3D({
+        candidates: [{ id: 'ptA', screenX: 400, screenY: 300, worldPos: [0, 0, 0] }],
+        pointerX: 460,
+        pointerY: 360,
+        rawGroundPos: [2.5, 2.5, 0],
+        isTouch: false,
+      })
+    ).toBeNull();
   });
 });

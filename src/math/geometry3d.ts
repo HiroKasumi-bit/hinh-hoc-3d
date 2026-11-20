@@ -622,3 +622,60 @@ export function formatPlaneEq(eq: PlaneEq): string {
 export function formatVec3(v: Vec3): string {
   return `(${formatNum(v[0])}; ${formatNum(v[1])}; ${formatNum(v[2])})`;
 }
+
+export interface ScreenPointCandidate {
+  id: string;
+  screenX: number;
+  screenY: number;
+  worldPos: Vec3;
+}
+
+export function pickMagneticPoint3D(params: {
+  candidates: ScreenPointCandidate[];
+  pointerX: number;
+  pointerY: number;
+  rawGroundPos?: Vec3 | null;
+  priorityCloseId?: string | null;
+  isTouch?: boolean;
+}): string | null {
+  const { candidates, pointerX, pointerY, rawGroundPos, priorityCloseId, isTouch = false } = params;
+  const normalScreenR = isTouch ? 34 : 24;
+  const priorityScreenR = isTouch ? 46 : 36;
+
+  if (priorityCloseId) {
+    const closeCand = candidates.find((c) => c.id === priorityCloseId);
+    if (closeCand) {
+      const dPx = Math.hypot(closeCand.screenX - pointerX, closeCand.screenY - pointerY);
+      const dWorld = rawGroundPos ? dist3(closeCand.worldPos, rawGroundPos) : Infinity;
+      if (dPx <= priorityScreenR || dWorld <= 0.72) {
+        return closeCand.id;
+      }
+    }
+  }
+
+  let bestScreenId: string | null = null;
+  let bestScreenDist = normalScreenR;
+  for (const c of candidates) {
+    const dPx = Math.hypot(c.screenX - pointerX, c.screenY - pointerY);
+    if (dPx <= bestScreenDist) {
+      bestScreenDist = dPx;
+      bestScreenId = c.id;
+    }
+  }
+  if (bestScreenId) return bestScreenId;
+
+  if (rawGroundPos) {
+    let bestWorldId: string | null = null;
+    let bestWorldDist = 0.52;
+    for (const c of candidates) {
+      const dWorld = dist3(c.worldPos, rawGroundPos);
+      if (dWorld <= bestWorldDist) {
+        bestWorldDist = dWorld;
+        bestWorldId = c.id;
+      }
+    }
+    return bestWorldId;
+  }
+
+  return null;
+}
