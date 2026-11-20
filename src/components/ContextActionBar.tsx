@@ -170,7 +170,7 @@ export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) 
         };
         return (
           <div
-            className={`pointer-events-auto absolute bottom-3 left-1/2 z-20 flex max-w-[95%] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-xl border px-3 py-1.5 text-xs shadow-sm ${
+            className={`pointer-events-auto absolute bottom-3 left-1/2 z-20 flex max-w-[96%] -translate-x-1/2 flex-nowrap items-center gap-2 whitespace-nowrap rounded-xl border px-3 py-1.5 text-xs shadow-sm ${
               isDark ? 'border-slate-700 bg-slate-900/95 text-slate-200' : 'border-[#DCE3EC] bg-white/96 text-[#0F1B2D]'
             }`}
           >
@@ -200,8 +200,8 @@ export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) 
                 0.5
               </button>
             </div>
-            <span className="hidden text-[11px] opacity-65 sm:inline">· Nhấn giữ điểm và kéo lên/xuống để chỉnh z</span>
-            <button type="button" onClick={clearSelection} className="rounded p-1 hover:bg-slate-200/50">
+            <span className="hidden text-[11px] opacity-65 lg:inline">· Nhấn giữ điểm kéo z</span>
+            <button type="button" onClick={clearSelection} className="shrink-0 rounded p-1 hover:bg-slate-200/50">
               <X className="h-3.5 w-3.5" />
             </button>
           </div>

@@ -130,7 +130,7 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
                 type="button"
                 title={tool.label}
                 onClick={() => (domain === '2d' ? setTool2D(tool.id as Tool2D) : setTool3D(tool.id as Tool3D))}
-                className={`flex shrink-0 items-center gap-1 rounded-md px-2 py-1.5 text-[11.5px] font-medium transition-colors ${
+                className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1.5 text-[11.5px] font-medium transition-colors ${
                   isActive
                     ? 'bg-[#1D5CE5] text-white'
                     : isDark
@@ -144,7 +144,7 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
             );
           })}
 
-          <div className={`mx-1 h-4 w-px shrink-0 ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
+          <div className={`mx-0.5 h-4 w-px shrink-0 ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
 
           <button
             type="button"
@@ -159,7 +159,7 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
             }`}
           >
             <CheckSquare className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Chọn nhiều</span>
+            <span className="hidden 2xl:inline">Chọn nhiều</span>
           </button>
         </div>
 
@@ -170,7 +170,7 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
             className="flex shrink-0 items-center gap-1 rounded-md bg-[#0E9F6E] px-2.5 py-1.5 text-[11.5px] font-semibold text-white transition-colors hover:bg-[#0B835B]"
           >
             <Plus className="h-3.5 w-3.5" />
-            <span>{compact ? 'Tạo 3D' : <><span className="sm:hidden">Tạo 3D</span><span className="hidden sm:inline">Hình khối & Oxyz</span></>}</span>
+            <span>{compact ? 'Tạo 3D' : <><span className="sm:hidden">Tạo 3D</span><span className="hidden sm:inline">Tạo khối & Oxyz</span></>}</span>
           </button>
         )}
       </div>
