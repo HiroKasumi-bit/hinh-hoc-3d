@@ -52,14 +52,19 @@ export const Canvas2D: React.FC = () => {
   const [hoverPointId, setHoverPointId] = useState<string | null>(null);
 
   const dragRef = useRef<{
-    kind: 'none' | 'pan' | 'point';
+    kind: 'none' | 'pan' | 'point' | 'pinch';
     pointId?: string;
     startScreenX: number;
     startScreenY: number;
     startCx: number;
     startCy: number;
+    pinchStartDist?: number;
+    pinchStartScale?: number;
+    pinchWorldMid?: Vec2;
     moved: boolean;
   }>({ kind: 'none', startScreenX: 0, startScreenY: 0, startCx: 0, startCy: 0, moved: false });
+
+  const pointersRef = useRef<Map<number, Vec2>>(new Map());
 
   const sliderScope = useMemo(
     () => Object.fromEntries(sliders.map((sl) => [sl.name, sl.value])),
@@ -854,11 +859,32 @@ export const Canvas2D: React.FC = () => {
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const [sx, sy] = getLocalPos(e);
+    pointersRef.current.set(e.pointerId, [sx, sy]);
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+
+    // 2-finger pinch-to-zoom on mobile / tablet!
+    if (pointersRef.current.size === 2) {
+      const [p1, p2] = Array.from(pointersRef.current.values());
+      const dist = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+      const midScreen: Vec2 = [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2];
+      dragRef.current = {
+        kind: 'pinch',
+        startScreenX: midScreen[0],
+        startScreenY: midScreen[1],
+        startCx: cam.cx,
+        startCy: cam.cy,
+        pinchStartDist: Math.max(10, dist),
+        pinchStartScale: cam.scale,
+        pinchWorldMid: screenToWorld(midScreen[0], midScreen[1]),
+        moved: true,
+      };
+      return;
+    }
+
     const hitPt = findHitPoint(sx, sy);
 
     if (e.button === 1 || (activeTool2D === 'select' && !hitPt)) {
       dragRef.current = { kind: 'pan', startScreenX: sx, startScreenY: sy, startCx: cam.cx, startCy: cam.cy, moved: false };
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
       return;
     }
 
@@ -867,7 +893,6 @@ export const Canvas2D: React.FC = () => {
       if (pt && !pt.computed) {
         pushHistory();
         dragRef.current = { kind: 'point', pointId: hitPt, startScreenX: sx, startScreenY: sy, startCx: cam.cx, startCy: cam.cy, moved: false };
-        (e.target as HTMLElement).setPointerCapture(e.pointerId);
         return;
       }
     }
@@ -880,6 +905,25 @@ export const Canvas2D: React.FC = () => {
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const [sx, sy] = getLocalPos(e);
+    if (pointersRef.current.has(e.pointerId)) {
+      pointersRef.current.set(e.pointerId, [sx, sy]);
+    }
+
+    if (dragRef.current.kind === 'pinch' && pointersRef.current.size === 2) {
+      const [p1, p2] = Array.from(pointersRef.current.values());
+      const dist = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+      const midX = (p1[0] + p2[0]) / 2;
+      const midY = (p1[1] + p2[1]) / 2;
+      const startDist = dragRef.current.pinchStartDist ?? 100;
+      const startScale = dragRef.current.pinchStartScale ?? cam.scale;
+      const worldMid = dragRef.current.pinchWorldMid ?? [0, 0];
+      const nextScale = Math.max(12, Math.min(320, startScale * (dist / startDist)));
+      const nextCx = worldMid[0] - (midX - size.width / 2) / nextScale;
+      const nextCy = worldMid[1] + (midY - size.height / 2) / nextScale;
+      setCam({ cx: nextCx, cy: nextCy, scale: nextScale });
+      return;
+    }
+
     const w = screenToWorld(sx, sy);
     setHoverWorld(w);
 
@@ -898,7 +942,7 @@ export const Canvas2D: React.FC = () => {
     if (dragRef.current.kind === 'point' && dragRef.current.pointId) {
       const dx = sx - dragRef.current.startScreenX;
       const dy = sy - dragRef.current.startScreenY;
-      if (Math.hypot(dx, dy) > 2) dragRef.current.moved = true;
+      if (Math.hypot(dx, dy) > 3) dragRef.current.moved = true;
       const snapped = snapCoord(w);
       movePoint2D(dragRef.current.pointId, snapped[0], snapped[1]);
       return;
@@ -908,9 +952,12 @@ export const Canvas2D: React.FC = () => {
   };
 
   const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    pointersRef.current.delete(e.pointerId);
     const [sx, sy] = getLocalPos(e);
     const d = dragRef.current;
-    dragRef.current = { kind: 'none', startScreenX: 0, startScreenY: 0, startCx: 0, startCy: 0, moved: false };
+    if (pointersRef.current.size < 2) {
+      dragRef.current = { kind: 'none', startScreenX: 0, startScreenY: 0, startCx: 0, startCy: 0, moved: false };
+    }
 
     if (!d.moved && (d.kind === 'pan' || d.kind === 'point')) {
       const hitPt = findHitPoint(sx, sy);
@@ -943,6 +990,7 @@ export const Canvas2D: React.FC = () => {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
         onPointerLeave={() => {
           setHoverWorld(null);
           setHoverPointId(null);

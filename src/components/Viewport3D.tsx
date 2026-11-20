@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { GizmoHelper, GizmoViewport, Html, Line, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { Axis3D, Eye, Layers, Sparkles } from 'lucide-react';
+import { Axis3D, Eye, Layers, SlidersHorizontal, Sparkles, X } from 'lucide-react';
 import { useGeometryStore } from '../store/useGeometryStore';
 import { compileExpression } from '../math/parser';
 import { formatNum } from '../math/geometry2d';
@@ -42,7 +42,7 @@ import type {
   Vec3,
 } from '../types/geometry';
 
-/** Keep Drei Html labels strictly below modals (z-50) by capping zIndexRange to [10, 0] */
+/** Keep Drei Html labels strictly below modals (z-[100]) by capping zIndexRange to [10, 0] */
 const Label3D: React.FC<{ position: [number, number, number]; children: React.ReactNode }> = ({
   position,
   children,
@@ -51,6 +51,28 @@ const Label3D: React.FC<{ position: [number, number, number]; children: React.Re
     {children}
   </Html>
 );
+
+interface ZDragSession {
+  pointId: string;
+  baseX: number;
+  baseY: number;
+  baseZ: number;
+  startClientX: number;
+  startClientY: number;
+  pointerId: number;
+  mode: 'create' | 'adjust';
+  activated: boolean;
+  moved: boolean;
+  timerId: number | null;
+}
+
+interface ZDragHud {
+  pointId: string;
+  x: number;
+  y: number;
+  z: number;
+  mode: 'create' | 'adjust';
+}
 
 // ==================== CAMERA CONTROLLER & PNG EXPORT BRIDGE ====================
 
@@ -64,7 +86,6 @@ const CameraRig: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl | nul
     if (!cameraRequest) return;
     const ctrl = controlsRef.current;
 
-    // Auto-compute bounding center & radius of active 3D geometry so every preset frames with clean margins
     const scope = Object.fromEntries(sliders.map((sl) => [sl.name, sl.value]));
     const ptMap = resolvePoints3D(scene3d.points, scene3d.planes, scope);
     const samplePts: Vec3[] = [];
@@ -90,8 +111,8 @@ const CameraRig: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl | nul
       }
     }
 
-    let centerMath: Vec3 = [1.0, 1.0, 1.2];
-    let radius = 3.2;
+    let centerMath: Vec3 = [0, 0, 0.5];
+    let radius = 3.6;
     if (samplePts.length > 0) {
       let minX = Infinity, maxX = -Infinity;
       let minY = Infinity, maxY = -Infinity;
@@ -109,7 +130,6 @@ const CameraRig: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl | nul
     }
 
     const dist = radius * 3.1;
-    // Standard Vietnamese Oxyz view: Ox forward-left, Oy right, Oz vertically up
     const dirMap: Record<CameraPreset3D, Vec3> = {
       oxyz: normalize3([0.74, 0.56, 0.44]),
       iso: normalize3([0.62, 0.62, 0.52]),
@@ -147,7 +167,7 @@ const CameraRig: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl | nul
   return null;
 };
 
-// ==================== VIETNAMESE OXYZ AXES & OXY GRID ====================
+// ==================== GROUND PLANE & OPTIONAL OXYZ AXES ====================
 
 const AxesOxyz: React.FC<{ isDark: boolean; showAxes: boolean; showGrid: boolean; showOxyPlane: boolean; showLabels: boolean }> = ({
   isDark,
@@ -157,9 +177,9 @@ const AxesOxyz: React.FC<{ isDark: boolean; showAxes: boolean; showGrid: boolean
   showLabels,
 }) => {
   const axisLen = 6.5;
+  const extent = 6;
   const gridLines = useMemo(() => {
     const segs: Array<[number, number, number]> = [];
-    const extent = 6;
     for (let i = -extent; i <= extent; i++) {
       segs.push(mathToScene([i, -extent, 0]), mathToScene([i, extent, 0]));
       segs.push(mathToScene([-extent, i, 0]), mathToScene([extent, i, 0]));
@@ -167,17 +187,38 @@ const AxesOxyz: React.FC<{ isDark: boolean; showAxes: boolean; showGrid: boolean
     return segs;
   }, []);
 
-  const gridColor = isDark ? '#334155' : '#D4DCE6';
-  const oxyFill = isDark ? '#1E293B' : '#E2E8F0';
+  const borderLoop = useMemo(
+    () => [
+      mathToScene([-extent, -extent, 0]),
+      mathToScene([extent, -extent, 0]),
+      mathToScene([extent, extent, 0]),
+      mathToScene([-extent, extent, 0]),
+      mathToScene([-extent, -extent, 0]),
+    ],
+    []
+  );
+
+  const gridColor = isDark ? '#334155' : '#CFD9E6';
+  const borderColor = isDark ? '#475569' : '#B6C4D6';
+  const oxyFill = isDark ? '#1E293B' : '#E8EEF5';
   const tickColor = isDark ? '#94A3B8' : '#64748B';
 
   return (
     <group>
       {showOxyPlane && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.004, 0]}>
-          <planeGeometry args={[12, 12]} />
-          <meshBasicMaterial color={oxyFill} transparent opacity={isDark ? 0.2 : 0.25} side={THREE.DoubleSide} depthWrite={false} />
-        </mesh>
+        <group>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.005, 0]}>
+            <planeGeometry args={[extent * 2, extent * 2]} />
+            <meshBasicMaterial
+              color={oxyFill}
+              transparent
+              opacity={isDark ? 0.24 : 0.42}
+              side={THREE.DoubleSide}
+              depthWrite={false}
+            />
+          </mesh>
+          <Line points={borderLoop} color={borderColor} lineWidth={1.3} transparent opacity={0.85} />
+        </group>
       )}
 
       {showGrid && (
@@ -247,6 +288,66 @@ const AxesOxyz: React.FC<{ isDark: boolean; showAxes: boolean; showGrid: boolean
   );
 };
 
+// ==================== LIVE Z-ELEVATION GUIDE VISUALS ====================
+
+const ZElevationGuide: React.FC<{ hud: ZDragHud; isDark: boolean }> = ({ hud, isDark }) => {
+  const { x, y, z } = hud;
+  const ringPts = useMemo(() => {
+    const pts: Array<[number, number, number]> = [];
+    const r = 0.28;
+    for (let i = 0; i <= 24; i++) {
+      const t = (i / 24) * Math.PI * 2;
+      pts.push(mathToScene([x + r * Math.cos(t), y + r * Math.sin(t), 0.01]));
+    }
+    return pts;
+  }, [x, y]);
+
+  const railMin = Math.min(-1.5, z - 2.5);
+  const railMax = Math.max(5.5, z + 2.5);
+
+  return (
+    <group>
+      {/* Subtle full vertical rail */}
+      <Line
+        points={[mathToScene([x, y, railMin]), mathToScene([x, y, railMax])]}
+        color="#1D5CE5"
+        lineWidth={1.3}
+        transparent
+        opacity={0.35}
+      />
+      {/* Crisp dashed drop-line from ground (x,y,0) to (x,y,z) */}
+      {Math.abs(z) > 0.01 && (
+        <Line
+          points={[mathToScene([x, y, 0]), mathToScene([x, y, z])]}
+          color="#E06D1F"
+          lineWidth={2.6}
+          dashed
+          dashSize={0.16}
+          gapSize={0.1}
+        />
+      )}
+      {/* Ground projection footprint ring at (x, y, 0) */}
+      <Line points={ringPts} color="#E06D1F" lineWidth={2} />
+      <mesh position={mathToScene([x, y, 0.01])}>
+        <sphereGeometry args={[0.055, 12, 12]} />
+        <meshBasicMaterial color="#E06D1F" />
+      </mesh>
+      {/* Floating live elevation readout */}
+      <Label3D position={mathToScene([x, y + 0.55, z + 0.35])}>
+        <div
+          className={`font-math pointer-events-none select-none whitespace-nowrap rounded-md border px-2 py-0.5 text-xs font-bold shadow-md ${
+            isDark
+              ? 'border-amber-400 bg-slate-900/95 text-amber-300'
+              : 'border-amber-500 bg-amber-50/98 text-amber-900'
+          }`}
+        >
+          ↕ z = {formatNum(z, 2)}
+        </div>
+      </Label3D>
+    </group>
+  );
+};
+
 // ==================== POLYHEDRON WITH REAL-TIME AUTO-DASHED HIDDEN EDGES ====================
 
 const PolyhedronRenderer: React.FC<{
@@ -262,7 +363,6 @@ const PolyhedronRenderer: React.FC<{
   const lastCamDir = useRef(new THREE.Vector3(99, 99, 99));
   const [hiddenMask, setHiddenMask] = useState<string>('');
 
-  // Triangulate polyhedron faces into one clean BufferGeometry
   const faceGeometry = useMemo(() => {
     const positions: number[] = [];
     for (const face of poly.faces) {
@@ -285,7 +385,6 @@ const PolyhedronRenderer: React.FC<{
 
   const effectiveAutoDashed = poly.autoDashed && autoDashedGlobal;
 
-  // Compute edges with live camera position
   const camMathPos: Vec3 = sceneToMath([camera.position.x, camera.position.y, camera.position.z]);
   const edges = useMemo(() => {
     return computePolyhedronEdgeVisibility(
@@ -293,7 +392,6 @@ const PolyhedronRenderer: React.FC<{
       ptMap,
       camMathPos
     );
-    // hiddenMask triggers clean re-evaluation ONLY when visibility mask actually flips!
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [poly, ptMap, effectiveAutoDashed, hiddenMask]);
 
@@ -354,7 +452,7 @@ const PolyhedronRenderer: React.FC<{
   );
 };
 
-// ==================== CROSS-SECTION POLYGON (Thiết diện Lớp 11!) ====================
+// ==================== CROSS-SECTION POLYGON ====================
 
 const CrossSectionRenderer: React.FC<{
   cs: CrossSection3D;
@@ -400,7 +498,6 @@ const CrossSectionRenderer: React.FC<{
   if (!result || !geometry) return null;
 
   const loopPts = [...result.vertices, result.vertices[0]].map((v) => mathToScene(v));
-  // Place section badge near the highest-y vertex offset slightly outward so it never covers vertex A
   const labelAnchor = result.vertices.reduce(
     (best, v) => (v[1] > best[1] ? v : best),
     result.vertices[0]
@@ -569,7 +666,7 @@ const VectorArrow3D: React.FC<{
   );
 };
 
-// ==================== SOLIDS OF REVOLUTION (Nón, Trụ, Cầu, Khối tròn xoay Tích phân!) ====================
+// ==================== SOLIDS OF REVOLUTION ====================
 
 const Solid3DRenderer: React.FC<{
   solid: Solid3D;
@@ -580,7 +677,6 @@ const Solid3DRenderer: React.FC<{
 }> = ({ solid, planes, ptMap, sliderScope, showLabels }) => {
   const centerScene = mathToScene(solid.center);
 
-  // Equator & meridian rings for spheres/cones/cylinders
   const circlePoints = (radius: number, zOffset = 0) => {
     const pts: Array<[number, number, number]> = [];
     for (let i = 0; i <= 64; i++) {
@@ -596,7 +692,6 @@ const Solid3DRenderer: React.FC<{
     return pts;
   };
 
-  // Revolution solid around math Ox (= scene Z axis!)
   const revGeometry = useMemo(() => {
     if (solid.kind !== 'revolution' || !solid.funcExpr || !solid.domain) return null;
     try {
@@ -614,7 +709,6 @@ const Solid3DRenderer: React.FC<{
       }
       pts.push(new THREE.Vector2(0, b));
       const geo = new THREE.LatheGeometry(pts, 32);
-      // LatheGeometry rotates around +Y_three; rotating +90° around X_three aligns +Y_three with +Z_three (= math +Ox!)
       geo.rotateX(Math.PI / 2);
       return geo;
     } catch {
@@ -624,7 +718,6 @@ const Solid3DRenderer: React.FC<{
 
   useEffect(() => () => revGeometry?.dispose(), [revGeometry]);
 
-  // Sphere-Plane automatic intersection circles!
   const sphereCircles = useMemo(() => {
     if (solid.kind !== 'sphere') return [];
     const results: Array<{ pts: Array<[number, number, number]>; r: number; center: Vec3 }> = [];
@@ -668,7 +761,6 @@ const Solid3DRenderer: React.FC<{
         </mesh>
         <Line points={circlePoints(solid.radius, 0)} color={solid.color} lineWidth={1.4} dashed dashSize={0.18} gapSize={0.12} />
         {sphereCircles.map((sc, idx) => {
-          // Place intersection circle badge on outer rim so it doesn't overlap I, H, or d(I, (P))
           const rimPos = sc.pts[Math.floor(sc.pts.length * 0.18)] ?? mathToScene(sc.center);
           return (
             <group key={idx}>
@@ -834,9 +926,10 @@ const Surface3DRenderer: React.FC<{ surface: Surface3D; sliderScope: Record<stri
   );
 };
 
-// ==================== MAIN 3D SCENE CONTENT ====================
+// ==================== MAIN 3D SCENE CONTENT WITH PRESS-AND-HOLD Z ELEVATION ====================
 
 const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl | null> }> = ({ controlsRef }) => {
+  const { camera, size } = useThree();
   const scene3d = useGeometryStore((s) => s.scene3d);
   const sliders = useGeometryStore((s) => s.sliders);
   const view = useGeometryStore((s) => s.view);
@@ -846,8 +939,15 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
   const handlePoint3DClick = useGeometryStore((s) => s.handlePoint3DClick);
   const selectItem = useGeometryStore((s) => s.selectItem);
   const addPoint3D = useGeometryStore((s) => s.addPoint3D);
+  const updatePoint3DCoords = useGeometryStore((s) => s.updatePoint3DCoords);
+  const pushHistory = useGeometryStore((s) => s.pushHistory);
 
   const isDark = view.theme === 'dark';
+
+  // Press-and-hold Z-drag session ref + reactive HUD
+  const dragRef = useRef<ZDragSession | null>(null);
+  const suppressClickIdRef = useRef<string | null>(null);
+  const [zHud, setZHud] = useState<ZDragHud | null>(null);
 
   const sliderScope = useMemo(
     () => Object.fromEntries(sliders.map((sl) => [sl.name, sl.value])),
@@ -859,7 +959,151 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
     [scene3d.points, scene3d.planes, sliderScope]
   );
 
-  // Helper to resolve segment or line into (point, dir)
+  // Window-level pointermove / pointerup for silky 1:1 vertical Z elevation on desktop & mobile!
+  useEffect(() => {
+    const computeUnitsPerPx = (baseX: number, baseY: number, baseZ: number) => {
+      const pScene = new THREE.Vector3(...mathToScene([baseX, baseY, baseZ]));
+      const dist = Math.max(2, camera.position.distanceTo(pScene));
+      const fovDeg = camera instanceof THREE.PerspectiveCamera ? camera.fov : 38;
+      const worldHeight = 2 * dist * Math.tan(((fovDeg * Math.PI) / 180) / 2);
+      return worldHeight / Math.max(200, size.height);
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      const session = dragRef.current;
+      if (!session || e.pointerId !== session.pointerId) return;
+
+      const dx = e.clientX - session.startClientX;
+      const dy = session.startClientY - e.clientY; // positive when dragging UP
+
+      // If existing point is being dragged vertically before 180ms timer finishes, activate Z-drag right away!
+      if (!session.activated && session.mode === 'adjust' && Math.abs(dy) >= 8 && Math.abs(dy) >= Math.abs(dx) * 0.8) {
+        if (session.timerId !== null) {
+          window.clearTimeout(session.timerId);
+          session.timerId = null;
+        }
+        session.activated = true;
+        session.moved = true;
+        suppressClickIdRef.current = session.pointId;
+        pushHistory();
+        if (controlsRef.current) controlsRef.current.enabled = false;
+        if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+          try { navigator.vibrate(16); } catch { /* ignore */ }
+        }
+        setZHud({ pointId: session.pointId, x: session.baseX, y: session.baseY, z: session.baseZ, mode: 'adjust' });
+      }
+
+      if (!session.activated) return;
+
+      if (Math.abs(dy) >= 4 || session.moved) {
+        session.moved = true;
+        const unitsPerPx = computeUnitsPerPx(session.baseX, session.baseY, session.baseZ);
+        const rawZ = Math.max(-12, Math.min(12, session.baseZ + dy * unitsPerPx));
+        const snap = useGeometryStore.getState().view.snapToGrid;
+        const nextZ = snap ? Math.round(rawZ * 2) / 2 : Number(rawZ.toFixed(2));
+        updatePoint3DCoords(session.pointId, [session.baseX, session.baseY, nextZ]);
+        setZHud({ pointId: session.pointId, x: session.baseX, y: session.baseY, z: nextZ, mode: session.mode });
+      }
+    };
+
+    const finishDrag = (e: PointerEvent) => {
+      const session = dragRef.current;
+      if (!session || e.pointerId !== session.pointerId) return;
+      if (session.timerId !== null) {
+        window.clearTimeout(session.timerId);
+      }
+      if (session.activated || session.moved) {
+        suppressClickIdRef.current = session.pointId;
+        setTimeout(() => {
+          if (suppressClickIdRef.current === session.pointId) {
+            suppressClickIdRef.current = null;
+          }
+        }, 80);
+      }
+      dragRef.current = null;
+      setZHud(null);
+      if (controlsRef.current) {
+        controlsRef.current.enabled = true;
+      }
+    };
+
+    window.addEventListener('pointermove', onPointerMove, { passive: true });
+    window.addEventListener('pointerup', finishDrag);
+    window.addEventListener('pointercancel', finishDrag);
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', finishDrag);
+      window.removeEventListener('pointercancel', finishDrag);
+    };
+  }, [camera, size.height, controlsRef, updatePoint3DCoords, pushHistory]);
+
+  // Ground plane press-and-hold point creation (tap = z=0, hold & drag up/down = elevate z!)
+  const handleGroundPointerDown = (e: ThreeEvent<PointerEvent>) => {
+    if (activeTool3D !== 'point') return;
+    if (e.nativeEvent.button !== 0 && e.nativeEvent.pointerType === 'mouse') return;
+    e.stopPropagation();
+
+    const m = sceneToMath([e.point.x, e.point.y, e.point.z]);
+    const snap = (v: number) => (view.snapToGrid ? Math.round(v * 2) / 2 : Number(v.toFixed(2)));
+    const x = snap(m[0]);
+    const y = snap(m[1]);
+    const newId = addPoint3D(x, y, 0);
+    selectItem({ domain: '3d', type: 'point', id: newId }, false);
+
+    if (controlsRef.current) controlsRef.current.enabled = false;
+    dragRef.current = {
+      pointId: newId,
+      baseX: x,
+      baseY: y,
+      baseZ: 0,
+      startClientX: e.nativeEvent.clientX,
+      startClientY: e.nativeEvent.clientY,
+      pointerId: e.nativeEvent.pointerId,
+      mode: 'create',
+      activated: true,
+      moved: false,
+      timerId: null,
+    };
+    setZHud({ pointId: newId, x, y, z: 0, mode: 'create' });
+  };
+
+  // Existing free 3D point press-and-hold to adjust Z height!
+  const handleExistingPointPointerDown = (e: ThreeEvent<PointerEvent>, pointId: string, pos: Vec3, isComputed: boolean) => {
+    if (isComputed) return;
+    if (e.nativeEvent.button !== 0 && e.nativeEvent.pointerType === 'mouse') return;
+    e.stopPropagation();
+
+    if (controlsRef.current) controlsRef.current.enabled = false;
+
+    const session: ZDragSession = {
+      pointId,
+      baseX: pos[0],
+      baseY: pos[1],
+      baseZ: pos[2],
+      startClientX: e.nativeEvent.clientX,
+      startClientY: e.nativeEvent.clientY,
+      pointerId: e.nativeEvent.pointerId,
+      mode: 'adjust',
+      activated: false,
+      moved: false,
+      timerId: null,
+    };
+
+    session.timerId = window.setTimeout(() => {
+      if (dragRef.current !== session) return;
+      session.activated = true;
+      session.moved = true;
+      suppressClickIdRef.current = pointId;
+      pushHistory();
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try { navigator.vibrate(18); } catch { /* ignore */ }
+      }
+      setZHud({ pointId, x: pos[0], y: pos[1], z: pos[2], mode: 'adjust' });
+    }, 200);
+
+    dragRef.current = session;
+  };
+
   const resolveLinear3D = (refId: string): { point: Vec3; dir: Vec3 } | null => {
     const seg = scene3d.segments.find((s) => s.id === refId);
     if (seg) {
@@ -893,7 +1137,7 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
         makeDefault
         enableDamping
         dampingFactor={0.08}
-        target={[1.2, 1.0, 1.2]}
+        target={[0, 0.3, 0]}
         minDistance={2}
         maxDistance={45}
       />
@@ -906,22 +1150,16 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
         showLabels={view.showLabels}
       />
 
-      {/* Clickable Oxy plane when placing 3D points directly */}
+      {/* Interactive horizontal ground plane when placing 3D points (press & drag up/down to set Z!) */}
       {activeTool3D === 'point' && (
-        <mesh
-          rotation={[-Math.PI / 2, 0, 0]}
-          position={[0, 0, 0]}
-          onClick={(e) => {
-            e.stopPropagation();
-            const m = sceneToMath([e.point.x, e.point.y, e.point.z]);
-            const snap = (v: number) => (view.snapToGrid ? Math.round(v * 2) / 2 : Number(v.toFixed(2)));
-            addPoint3D(snap(m[0]), snap(m[1]), 0);
-          }}
-        >
-          <planeGeometry args={[16, 16]} />
-          <meshBasicMaterial transparent opacity={0} side={THREE.DoubleSide} />
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} onPointerDown={handleGroundPointerDown}>
+          <planeGeometry args={[28, 28]} />
+          <meshBasicMaterial transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
         </mesh>
       )}
+
+      {/* Active live Z-elevation visual guide rail & ground drop-line */}
+      {zHud && <ZElevationGuide hud={zHud} isDark={isDark} />}
 
       {/* Polyhedra */}
       {scene3d.polyhedra.map(
@@ -970,7 +1208,7 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
           )
       )}
 
-      {/* Solids (Sphere, Cone, Cylinder, Revolution) */}
+      {/* Solids */}
       {scene3d.solids.map(
         (solid) =>
           solid.visible && (
@@ -985,7 +1223,7 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
           )
       )}
 
-      {/* Explicit Surfaces z = f(x, y) */}
+      {/* Explicit Surfaces */}
       {scene3d.surfaces.map(
         (surf) => surf.visible && <Surface3DRenderer key={surf.id} surface={surf} sliderScope={sliderScope} />
       )}
@@ -1072,7 +1310,7 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
         return <VectorArrow3D key={vec.id} origin={orig} tip={tip} color={vec.color} label={vec.name} showLabel={view.showLabels} />;
       })}
 
-      {/* 3D Measurements (Distances, Skew Common Perpendicular, Angles!) */}
+      {/* Measurements */}
       {scene3d.measurements.map((m) => {
         if (!m.visible) return null;
 
@@ -1237,51 +1475,87 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
         return null;
       })}
 
-      {/* 3D Points */}
+      {/* 3D Points with generous invisible touch hitboxes & press-and-hold Z elevation */}
       {scene3d.points.map((pt) => {
         if (!pt.visible) return null;
         const pos = ptMap.get(pt.id) ?? [pt.x, pt.y, pt.z];
         const scenePos = mathToScene(pos);
         const isSel = selection.some((x) => x.domain === '3d' && x.type === 'point' && x.id === pt.id);
         const isPending = pendingIds.includes(pt.id);
+        const isDraggingZ = zHud?.pointId === pt.id;
         return (
-          <group key={pt.id} position={scenePos}>
-            <mesh
-              onClick={(e) => {
-                e.stopPropagation();
-                handlePoint3DClick(pt.id, e.shiftKey || e.ctrlKey || e.metaKey);
-              }}
-            >
-              <sphereGeometry args={[isSel || isPending ? 0.13 : 0.095, 18, 18]} />
-              <meshStandardMaterial color={isPending ? '#E06D1F' : isSel ? '#1D5CE5' : pt.color} />
-            </mesh>
-            {(isSel || isPending) && (
-              <mesh>
-                <sphereGeometry args={[0.19, 16, 16]} />
-                <meshBasicMaterial color={isPending ? '#E06D1F' : '#1D5CE5'} transparent opacity={0.25} />
+          <group key={pt.id}>
+            {/* Subtle elevation drop-line when selected and off ground plane */}
+            {isSel && !isDraggingZ && Math.abs(pos[2]) > 0.05 && (
+              <Line
+                points={[mathToScene([pos[0], pos[1], 0]), scenePos]}
+                color="#1D5CE5"
+                lineWidth={1.3}
+                dashed
+                dashSize={0.14}
+                gapSize={0.1}
+                transparent
+                opacity={0.55}
+              />
+            )}
+
+            <group position={scenePos}>
+              {/* Generous invisible hit sphere for effortless finger & mouse grab */}
+              <mesh
+                onPointerDown={(e) => handleExistingPointPointerDown(e, pt.id, pos, Boolean(pt.computed))}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (suppressClickIdRef.current === pt.id) return;
+                  handlePoint3DClick(pt.id, e.shiftKey || e.ctrlKey || e.metaKey);
+                }}
+              >
+                <sphereGeometry args={[0.28, 12, 12]} />
+                <meshBasicMaterial transparent opacity={0} depthWrite={false} />
               </mesh>
-            )}
-            {view.showLabels && pt.showLabel && (
-              <Label3D position={[0.14, 0.22, 0]}>
-                <span
-                  className={`pointer-events-none select-none whitespace-nowrap rounded px-1 text-xs font-bold ${
-                    isSel
-                      ? 'bg-[#1D5CE5] text-white'
-                      : isDark
-                      ? 'bg-slate-900/75 text-slate-100'
-                      : 'bg-white/80 text-[#0F1B2D]'
-                  }`}
-                >
-                  {pt.name}
-                </span>
-              </Label3D>
-            )}
+
+              {/* Visible point sphere */}
+              <mesh>
+                <sphereGeometry args={[isDraggingZ ? 0.14 : isSel || isPending ? 0.125 : 0.095, 18, 18]} />
+                <meshStandardMaterial
+                  color={isDraggingZ ? '#E06D1F' : isPending ? '#E06D1F' : isSel ? '#1D5CE5' : pt.color}
+                />
+              </mesh>
+
+              {(isSel || isPending || isDraggingZ) && (
+                <mesh>
+                  <sphereGeometry args={[isDraggingZ ? 0.23 : 0.18, 16, 16]} />
+                  <meshBasicMaterial
+                    color={isDraggingZ || isPending ? '#E06D1F' : '#1D5CE5'}
+                    transparent
+                    opacity={isDraggingZ ? 0.3 : 0.22}
+                  />
+                </mesh>
+              )}
+
+              {view.showLabels && pt.showLabel && (
+                <Label3D position={[0.15, 0.23, 0]}>
+                  <span
+                    className={`pointer-events-none select-none whitespace-nowrap rounded px-1 text-xs font-bold ${
+                      isDraggingZ
+                        ? 'bg-[#E06D1F] text-white'
+                        : isSel
+                        ? 'bg-[#1D5CE5] text-white'
+                        : isDark
+                        ? 'bg-slate-900/75 text-slate-100'
+                        : 'bg-white/85 text-[#0F1B2D]'
+                    }`}
+                  >
+                    {pt.name}
+                  </span>
+                </Label3D>
+              )}
+            </group>
           </group>
         );
       })}
 
       {view.showAxes && (
-        <GizmoHelper alignment="bottom-right" margin={[62, 62]}>
+        <GizmoHelper alignment="bottom-right" margin={[58, 58]}>
           <GizmoViewport
             axisColors={['#16A34A', '#2563EB', '#DC2626']}
             labels={['y', 'z', 'x']}
@@ -1293,124 +1567,146 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
   );
 };
 
-// ==================== OUTER 3D VIEWPORT WITH PRECISION OVERLAY CONTROLS ====================
+// ==================== OUTER 3D VIEWPORT WITH MOBILE-FRIENDLY CONTROLS ====================
 
 export const Viewport3D: React.FC = () => {
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const view = useGeometryStore((s) => s.view);
   const updateView = useGeometryStore((s) => s.updateView);
   const requestCamera = useGeometryStore((s) => s.requestCamera);
+  const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
   const isDark = view.theme === 'dark';
 
   const camButtons: Array<{ id: CameraPreset3D; label: string }> = [
-    { id: 'oxyz', label: 'Oxyz' },
+    { id: 'oxyz', label: '3D' },
     { id: 'top', label: 'Trên' },
     { id: 'front', label: 'Trước' },
     { id: 'side', label: 'Cạnh' },
   ];
 
+  const controlsPanel = (
+    <>
+      {/* Camera Presets */}
+      <div
+        className={`flex items-center overflow-hidden rounded-lg border text-xs font-medium shadow-xs ${
+          isDark ? 'border-slate-700 bg-slate-900/92 text-slate-200' : 'border-[#DCE3EC] bg-white/95 text-[#0F1B2D]'
+        }`}
+      >
+        {camButtons.map((btn) => (
+          <button
+            key={btn.id}
+            type="button"
+            onClick={() => requestCamera(btn.id)}
+            className={`px-2.5 py-1.5 transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
+          >
+            {btn.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Toggles & Opacity */}
+      <div
+        className={`flex flex-col gap-1.5 rounded-lg border p-2 text-xs shadow-xs ${
+          isDark ? 'border-slate-700 bg-slate-900/94 text-slate-200' : 'border-[#DCE3EC] bg-white/95 text-[#0F1B2D]'
+        }`}
+      >
+        <button
+          type="button"
+          onClick={() => updateView({ showAxes: !view.showAxes })}
+          className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-left font-medium transition-colors ${
+            view.showAxes
+              ? 'bg-[#1D5CE5]/12 text-[#1D5CE5]'
+              : isDark
+              ? 'text-slate-400 hover:bg-slate-800'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Axis3D className="h-3.5 w-3.5" />
+          <span>Trục tọa độ Oxyz</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => updateView({ autoDashedHiddenEdges: !view.autoDashedHiddenEdges })}
+          className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-left font-medium transition-colors ${
+            view.autoDashedHiddenEdges
+              ? 'bg-[#1D5CE5]/12 text-[#1D5CE5]'
+              : isDark
+              ? 'text-slate-400 hover:bg-slate-800'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          <span>Nét đứt cạnh khuất</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => updateView({ showOxyPlane3D: !view.showOxyPlane3D })}
+          className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-left font-medium transition-colors ${
+            view.showOxyPlane3D
+              ? 'bg-[#0E9F6E]/12 text-[#0E9F6E]'
+              : isDark
+              ? 'text-slate-400 hover:bg-slate-800'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Layers className="h-3.5 w-3.5" />
+          <span>Mặt phẳng đáy</span>
+        </button>
+
+        <div className="flex flex-col gap-1 px-1 pt-0.5">
+          <div className="flex items-center justify-between text-[11px] opacity-80">
+            <span className="flex items-center gap-1">
+              <Eye className="h-3 w-3" />
+              Độ mờ khối
+            </span>
+            <span className="font-math">{Math.round(view.globalFaceOpacity * 100)}%</span>
+          </div>
+          <input
+            type="range"
+            min={0.04}
+            max={0.6}
+            step={0.02}
+            value={view.globalFaceOpacity}
+            onChange={(e) => updateView({ globalFaceOpacity: parseFloat(e.target.value) })}
+            className="math-slider w-32"
+          />
+        </div>
+      </div>
+    </>
+  );
+
   return (
-    <div className="relative isolate z-0 h-full w-full overflow-hidden">
+    <div className="relative isolate z-0 h-full w-full touch-none select-none overflow-hidden">
       <Canvas
         dpr={[1, 2]}
-        camera={{ position: [7.6, 6.4, 8.8], fov: 38, near: 0.1, far: 200 }}
+        camera={{ position: [7.6, 6.2, 8.8], fov: 38, near: 0.1, far: 200 }}
         gl={{ antialias: true, preserveDrawingBuffer: true }}
       >
         <Scene3DContent controlsRef={controlsRef} />
       </Canvas>
 
-      {/* Top-right 3D Viewing Studio Controls */}
-      <div className="pointer-events-auto absolute top-3 right-3 flex flex-col items-end gap-1.5">
-        {/* Camera Presets */}
-        <div
-          className={`flex items-center overflow-hidden rounded-lg border text-xs font-medium shadow-xs ${
-            isDark ? 'border-slate-700 bg-slate-900/90 text-slate-200' : 'border-[#DCE3EC] bg-white/95 text-[#0F1B2D]'
+      {/* Desktop: Always visible top-right studio controls */}
+      <div className="pointer-events-auto absolute top-3 right-3 hidden flex-col items-end gap-1.5 sm:flex">
+        {controlsPanel}
+      </div>
+
+      {/* Mobile (< 640px): Compact collapsible toggle button so 3D plane stays wide open */}
+      <div className="pointer-events-auto absolute top-2.5 right-2.5 flex flex-col items-end gap-1.5 sm:hidden">
+        <button
+          type="button"
+          onClick={() => setMobilePanelOpen((o) => !o)}
+          className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold shadow-xs ${
+            isDark
+              ? 'border-slate-700 bg-slate-900/92 text-slate-200'
+              : 'border-[#DCE3EC] bg-white/95 text-[#0F1B2D]'
           }`}
         >
-          {camButtons.map((btn) => (
-            <button
-              key={btn.id}
-              type="button"
-              onClick={() => requestCamera(btn.id)}
-              className={`px-2.5 py-1.5 transition-colors ${
-                isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
-              }`}
-            >
-              {btn.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Auto-Dashed Hidden Edges & X-Ray Opacity */}
-        <div
-          className={`flex flex-col gap-2 rounded-lg border p-2.5 text-xs shadow-xs ${
-            isDark ? 'border-slate-700 bg-slate-900/92 text-slate-200' : 'border-[#DCE3EC] bg-white/95 text-[#0F1B2D]'
-          }`}
-        >
-          <button
-            type="button"
-            onClick={() => updateView({ showAxes: !view.showAxes })}
-            className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-left font-medium transition-colors ${
-              view.showAxes
-                ? 'bg-[#1D5CE5]/12 text-[#1D5CE5]'
-                : isDark
-                ? 'text-slate-400 hover:bg-slate-800'
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <Axis3D className="h-3.5 w-3.5" />
-            <span>Trục tọa độ Oxyz</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => updateView({ autoDashedHiddenEdges: !view.autoDashedHiddenEdges })}
-            className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-left font-medium transition-colors ${
-              view.autoDashedHiddenEdges
-                ? 'bg-[#1D5CE5]/12 text-[#1D5CE5]'
-                : isDark
-                ? 'text-slate-400 hover:bg-slate-800'
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <Sparkles className="h-3.5 w-3.5" />
-            <span>Nét đứt cạnh khuất</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => updateView({ showOxyPlane3D: !view.showOxyPlane3D })}
-            className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-left font-medium transition-colors ${
-              view.showOxyPlane3D
-                ? 'bg-[#0E9F6E]/12 text-[#0E9F6E]'
-                : isDark
-                ? 'text-slate-400 hover:bg-slate-800'
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <Layers className="h-3.5 w-3.5" />
-            <span>Mặt đáy (Oxy)</span>
-          </button>
-
-          <div className="flex flex-col gap-1 px-1 pt-0.5">
-            <div className="flex items-center justify-between text-[11px] opacity-80">
-              <span className="flex items-center gap-1">
-                <Eye className="h-3 w-3" />
-                Độ mờ khối
-              </span>
-              <span className="font-math">{Math.round(view.globalFaceOpacity * 100)}%</span>
-            </div>
-            <input
-              type="range"
-              min={0.04}
-              max={0.6}
-              step={0.02}
-              value={view.globalFaceOpacity}
-              onChange={(e) => updateView({ globalFaceOpacity: parseFloat(e.target.value) })}
-              className="math-slider w-32"
-            />
-          </div>
-        </div>
+          {mobilePanelOpen ? <X className="h-3.5 w-3.5" /> : <SlidersHorizontal className="h-3.5 w-3.5" />}
+          <span>Hiển thị</span>
+        </button>
+        {mobilePanelOpen && controlsPanel}
       </div>
     </div>
   );

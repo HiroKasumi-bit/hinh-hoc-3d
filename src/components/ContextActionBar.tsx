@@ -1,31 +1,32 @@
 import React from 'react';
-import { X } from 'lucide-react';
+import { ArrowDown, ArrowUp, X } from 'lucide-react';
 import { useGeometryStore } from '../store/useGeometryStore';
+import { formatNum } from '../math/geometry2d';
 
 const TOOL_2D_HINTS: Record<string, string> = {
-  point: 'Nhấn bất kỳ vị trí nào trên mặt phẳng Oxy để chấm điểm mới',
-  segment: 'Nhấn chọn lần lượt 2 điểm để nối đoạn thẳng',
-  line: 'Nhấn chọn 2 điểm để dựng đường thẳng đi qua',
-  vector: 'Nhấn điểm gốc rồi nhấn điểm ngọn để vẽ vectơ',
-  circle: 'Nhấn tâm đường tròn rồi nhấn 1 điểm trên đường tròn',
-  polygon: 'Nhấn lần lượt các đỉnh, nhấn lại đỉnh đầu tiên để khép kín đa giác',
-  midpoint: 'Nhấn chọn 2 điểm để lấy trung điểm',
-  perpendicular: 'Nhấn chọn 1 điểm, sau đó nhấn chọn 1 đường thẳng để hạ đường vuông góc',
-  angle: 'Nhấn chọn 3 điểm A → B (đỉnh góc) → C để đo góc ∠ABC',
-  distance: 'Nhấn chọn 2 điểm để đo khoảng cách',
+  point: 'Chạm bất kỳ vị trí nào để chấm điểm mới',
+  segment: 'Chọn lần lượt 2 điểm để nối đoạn thẳng',
+  line: 'Chọn 2 điểm để dựng đường thẳng đi qua',
+  vector: 'Chọn điểm gốc rồi điểm ngọn để vẽ vectơ',
+  circle: 'Chọn tâm đường tròn rồi 1 điểm trên đường tròn',
+  polygon: 'Chọn các đỉnh rồi chạm lại đỉnh đầu tiên để khép kín',
+  midpoint: 'Chọn 2 điểm để lấy trung điểm',
+  perpendicular: 'Chọn 1 điểm rồi chọn 1 đường thẳng để hạ đường vuông góc',
+  angle: 'Chọn 3 điểm A → B (đỉnh góc) → C để đo góc ∠ABC',
+  distance: 'Chọn 2 điểm để đo khoảng cách',
 };
 
 const TOOL_3D_HINTS: Record<string, string> = {
-  point: 'Nhấn lên mặt phẳng (Oxy) để chấm điểm 3D mới (có thể chỉnh cao độ z ở danh sách bên trái)',
-  segment: 'Nhấn lần lượt 2 điểm trong không gian để nối đoạn thẳng',
-  line: 'Nhấn 2 điểm để dựng đường thẳng Oxyz',
-  vector: 'Nhấn điểm gốc rồi điểm ngọn để vẽ vectơ 3D',
-  plane3p: 'Nhấn lần lượt 3 điểm không thẳng hàng để dựng mặt phẳng (ABC)',
-  midpoint: 'Nhấn chọn 2 điểm để lấy trung điểm',
-  ratio: 'Nhấn chọn 2 điểm A, B để chia đoạn theo tỉ lệ k = 1/3',
-  crossSection: 'Nhấn chọn 3 điểm trên hình khối để tự động cắt ra đa giác Thiết diện',
-  distance: 'Nhấn chọn 2 điểm để đo độ dài (hoặc dùng Chế độ Chọn + Shift-click 1 điểm & 1 mặt phẳng!)',
-  angle: 'Nhấn chọn 3 điểm A → B (đỉnh) → C để đo góc không gian ∠ABC',
+  point: 'Chạm mặt phẳng để đặt điểm · Nhấn giữ và kéo lên/xuống để nâng độ cao z',
+  segment: 'Chạm lần lượt 2 điểm để nối đoạn thẳng',
+  line: 'Chạm 2 điểm để dựng đường thẳng không gian',
+  vector: 'Chạm điểm gốc rồi điểm ngọn để vẽ vectơ 3D',
+  plane3p: 'Chạm 3 điểm không thẳng hàng để dựng mặt phẳng (ABC)',
+  midpoint: 'Chạm 2 điểm để lấy trung điểm',
+  ratio: 'Chạm 2 điểm A, B để chia đoạn theo tỉ lệ k = 1/3',
+  crossSection: 'Chạm 3 điểm trên hình khối để cắt ra đa giác Thiết diện',
+  distance: 'Chạm 2 điểm để đo độ dài (hoặc bật "Chọn nhiều" để chọn điểm & mặt phẳng)',
+  angle: 'Chạm 3 điểm A → B (đỉnh) → C để đo góc không gian ∠ABC',
 };
 
 export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) => {
@@ -37,6 +38,9 @@ export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) 
   const selection = useGeometryStore((s) => s.selection).filter((x) => x.domain === domain);
   const clearSelection = useGeometryStore((s) => s.clearSelection);
   const view = useGeometryStore((s) => s.view);
+  const scene3d = useGeometryStore((s) => s.scene3d);
+  const updatePoint3DCoords = useGeometryStore((s) => s.updatePoint3DCoords);
+  const pushHistory = useGeometryStore((s) => s.pushHistory);
 
   const createSegmentFromSelection = useGeometryStore((s) => s.createSegmentFromSelection);
   const createLineFromSelection = useGeometryStore((s) => s.createLineFromSelection);
@@ -156,14 +160,62 @@ export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) 
   }
 
   if (actions.length === 0) {
+    if (domain === '3d' && selection.length === 1 && pts.length === 1) {
+      const selectedPt = scene3d.points.find((p) => p.id === pts[0].id);
+      if (selectedPt && !selectedPt.computed) {
+        const stepZ = (delta: number) => {
+          pushHistory();
+          const nextZ = Number((selectedPt.z + delta).toFixed(2));
+          updatePoint3DCoords(selectedPt.id, [selectedPt.x, selectedPt.y, nextZ]);
+        };
+        return (
+          <div
+            className={`pointer-events-auto absolute bottom-3 left-1/2 z-20 flex max-w-[95%] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-xl border px-3 py-1.5 text-xs shadow-sm ${
+              isDark ? 'border-slate-700 bg-slate-900/95 text-slate-200' : 'border-[#DCE3EC] bg-white/96 text-[#0F1B2D]'
+            }`}
+          >
+            <span className="font-semibold text-[#1D5CE5]">Điểm {selectedPt.name}</span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                title="Hạ z xuống 0.5"
+                onClick={() => stepZ(-0.5)}
+                className={`flex items-center gap-0.5 rounded border px-2 py-1 font-math text-[11px] font-semibold ${
+                  isDark ? 'border-slate-700 bg-slate-800 hover:bg-slate-700' : 'border-slate-200 bg-[#F2F5F9] hover:bg-slate-200'
+                }`}
+              >
+                <ArrowDown className="h-3 w-3" />
+                0.5
+              </button>
+              <span className="font-math px-1.5 text-xs font-bold">z = {formatNum(selectedPt.z, 2)}</span>
+              <button
+                type="button"
+                title="Nâng z lên 0.5"
+                onClick={() => stepZ(0.5)}
+                className={`flex items-center gap-0.5 rounded border px-2 py-1 font-math text-[11px] font-semibold ${
+                  isDark ? 'border-slate-700 bg-slate-800 hover:bg-slate-700' : 'border-slate-200 bg-[#F2F5F9] hover:bg-slate-200'
+                }`}
+              >
+                <ArrowUp className="h-3 w-3" />
+                0.5
+              </button>
+            </div>
+            <span className="hidden text-[11px] opacity-65 sm:inline">· Nhấn giữ điểm và kéo lên/xuống để chỉnh z</span>
+            <button type="button" onClick={clearSelection} className="rounded p-1 hover:bg-slate-200/50">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        );
+      }
+    }
     if (domain === '3d' && selection.length === 1) {
       return (
         <div
-          className={`pointer-events-auto absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-lg border px-3 py-1.5 text-xs shadow-xs ${
+          className={`pointer-events-auto absolute bottom-3 left-1/2 z-20 flex max-w-[94%] -translate-x-1/2 items-center gap-2 rounded-lg border px-3 py-1.5 text-xs shadow-xs ${
             isDark ? 'border-slate-700 bg-slate-900/92 text-slate-300' : 'border-[#DCE3EC] bg-white/95 text-slate-600'
           }`}
         >
-          <span>Giữ <strong className="font-semibold">Shift + Nhấp</strong> thêm đối tượng (điểm / mặt / đoạn) để dựng hình & tính góc, khoảng cách tức thì</span>
+          <span>Bật <strong>Chọn nhiều</strong> (hoặc giữ <strong>Shift</strong>) để chọn thêm điểm/mặt và dựng hình tức thì</span>
           <button type="button" onClick={clearSelection} className="rounded p-0.5 hover:bg-slate-200/50">
             <X className="h-3.5 w-3.5" />
           </button>

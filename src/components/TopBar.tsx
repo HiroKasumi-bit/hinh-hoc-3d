@@ -106,35 +106,36 @@ export const TopBar: React.FC = () => {
   return (
     <>
       <header
-        className={`z-30 flex h-12 shrink-0 items-center justify-between border-b px-3 transition-colors ${
+        className={`z-30 flex h-12 shrink-0 items-center justify-between gap-1.5 border-b px-2 sm:px-3 transition-colors ${
           isDark
             ? 'border-slate-800 bg-[#111827] text-slate-100'
             : 'border-[#E2E7EE] bg-white text-[#0F1B2D]'
         }`}
       >
         {/* Left: Sidebar toggle + Brand */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-1.5 sm:gap-2.5">
           <button
             type="button"
-            title={sidebarOpen ? 'Thu gọn bảng bên trái' : 'Mở bảng bên trái'}
+            aria-label={sidebarOpen ? 'Thu gọn bảng bên trái' : 'Mở bảng nhập & đối tượng'}
+            title={sidebarOpen ? 'Thu gọn bảng bên trái' : 'Mở bảng nhập & đối tượng'}
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className={`rounded-md p-1.5 transition-colors ${
+            className={`rounded-md p-2 transition-colors ${
               isDark ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-slate-100 text-slate-600'
             }`}
           >
             <PanelLeft className="h-4 w-4" />
           </button>
 
-          <div className="flex items-center gap-2">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" className="shrink-0">
               <polygon points="12,2.5 21,7.5 12,12.5 3,7.5" fill="#1D5CE5" fillOpacity="0.18" stroke="#1D5CE5" strokeWidth="1.7" strokeLinejoin="round" />
               <polygon points="3,7.5 12,12.5 12,21.5 3,16.5" fill="#0E9F6E" fillOpacity="0.16" stroke="#1D5CE5" strokeWidth="1.7" strokeLinejoin="round" />
               <polygon points="21,7.5 12,12.5 12,21.5 21,16.5" fill="#1D5CE5" fillOpacity="0.08" stroke="#1D5CE5" strokeWidth="1.7" strokeLinejoin="round" />
               <line x1="12" y1="2.5" x2="12" y2="21.5" stroke="#1D5CE5" strokeWidth="1.2" strokeDasharray="2 2" />
             </svg>
             <div className="leading-tight">
-              <span className="text-sm font-bold tracking-tight">HìnhHọcViệt</span>
-              <span className={`ml-1.5 hidden text-[11px] font-medium sm:inline ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              <span className="hidden text-sm font-bold tracking-tight sm:inline">HìnhHọcViệt</span>
+              <span className={`ml-1.5 hidden text-[11px] font-medium lg:inline ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 Toán THPT 10–11–12
               </span>
             </div>
@@ -154,7 +155,7 @@ export const TopBar: React.FC = () => {
                 key={opt.id}
                 type="button"
                 onClick={() => setMode(opt.id)}
-                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-all ${
+                className={`${opt.id === 'split' ? 'hidden sm:flex' : 'flex'} items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition-all ${
                   active
                     ? isDark
                       ? 'bg-[#1D5CE5] text-white shadow-2xs'
@@ -165,6 +166,7 @@ export const TopBar: React.FC = () => {
                 }`}
               >
                 {opt.icon}
+                <span className="sm:hidden">{opt.id === '2d' ? '2D' : '3D'}</span>
                 <span className="hidden md:inline">{opt.label}</span>
               </button>
             );
@@ -172,17 +174,18 @@ export const TopBar: React.FC = () => {
         </div>
 
         {/* Right: THPT Presets + Utility Controls */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5 sm:gap-1">
           <button
             type="button"
             onClick={() => setPresetModalOpen(true)}
             className="flex items-center gap-1.5 rounded-md bg-[#1D5CE5] px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#174CC2]"
           >
             <BookOpen className="h-3.5 w-3.5" />
-            <span>Mẫu đề THPT</span>
+            <span className="hidden sm:inline">Mẫu đề THPT</span>
+            <span className="sm:hidden">Mẫu</span>
           </button>
 
-          <div className={`mx-1 h-5 w-px ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
+          <div className={`mx-1 hidden h-5 w-px sm:block ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
 
           <button
             type="button"
@@ -200,7 +203,7 @@ export const TopBar: React.FC = () => {
             title="Làm lại (Ctrl+Y)"
             disabled={future.length === 0}
             onClick={redo}
-            className={`rounded-md p-1.5 transition-colors disabled:opacity-35 ${
+            className={`hidden rounded-md p-1.5 transition-colors disabled:opacity-35 sm:inline-flex ${
               isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
             }`}
           >
@@ -221,7 +224,7 @@ export const TopBar: React.FC = () => {
             type="button"
             title={view.showGrid ? 'Tắt lưới ô vuông' : 'Bật lưới ô vuông'}
             onClick={() => updateView({ showGrid: !view.showGrid })}
-            className={`rounded-md p-1.5 transition-colors ${
+            className={`hidden rounded-md p-1.5 transition-colors sm:inline-flex ${
               view.showGrid ? 'bg-[#1D5CE5]/12 text-[#1D5CE5]' : 'opacity-50'
             } ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
           >
@@ -231,20 +234,20 @@ export const TopBar: React.FC = () => {
             type="button"
             title="Bật/tắt tên điểm & số đo"
             onClick={() => updateView({ showLabels: !view.showLabels })}
-            className={`rounded-md p-1.5 transition-colors ${
+            className={`hidden rounded-md p-1.5 transition-colors md:inline-flex ${
               view.showLabels ? 'text-[#1D5CE5]' : 'opacity-50'
             } ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
           >
             <Tag className="h-4 w-4" />
           </button>
 
-          <div className={`mx-1 hidden h-5 w-px sm:block ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
+          <div className={`mx-1 hidden h-5 w-px md:block ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
 
           <button
             type="button"
             title="Chụp ảnh PNG chèn Word / Đề thi"
             onClick={handleExportPNG}
-            className={`hidden items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors sm:flex ${
+            className={`hidden items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors md:flex ${
               isDark ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-slate-100 text-slate-700'
             }`}
           >
@@ -256,7 +259,7 @@ export const TopBar: React.FC = () => {
             type="button"
             title="Lưu tệp bài làm (.json)"
             onClick={handleSaveJSON}
-            className={`rounded-md p-1.5 transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
+            className={`hidden rounded-md p-1.5 transition-colors md:inline-flex ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
           >
             <Save className="h-4 w-4" />
           </button>
@@ -265,7 +268,7 @@ export const TopBar: React.FC = () => {
             type="button"
             title="Mở tệp đã lưu (.json)"
             onClick={() => fileInputRef.current?.click()}
-            className={`rounded-md p-1.5 transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
+            className={`hidden rounded-md p-1.5 transition-colors md:inline-flex ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
           >
             <FolderOpen className="h-4 w-4" />
           </button>

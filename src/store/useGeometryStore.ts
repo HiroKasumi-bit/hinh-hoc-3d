@@ -78,6 +78,7 @@ interface GeometryStore {
   toast: { text: string; tone: 'info' | 'success' | 'error' } | null;
   activePresetId: string | null;
   sidebarOpen: boolean;
+  multiSelectMode: boolean;
 
   past: SceneSnapshot[];
   future: SceneSnapshot[];
@@ -87,6 +88,7 @@ interface GeometryStore {
   setTool2D: (tool: Tool2D) => void;
   setTool3D: (tool: Tool3D) => void;
   setSidebarOpen: (open: boolean) => void;
+  toggleMultiSelectMode: () => void;
   updateView: (partial: Partial<ViewSettings>) => void;
   requestCamera: (preset: CameraPreset3D) => void;
   showToast: (text: string, tone?: 'info' | 'success' | 'error') => void;
@@ -172,18 +174,19 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
   scene3d: initialEmptySnap.scene3d,
   view: {
     showAxes: false,
-    showGrid: false,
+    showGrid: true,
     showLabels: true,
     snapToGrid: true,
     autoDashedHiddenEdges: true,
     globalFaceOpacity: 0.16,
-    showOxyPlane3D: false,
+    showOxyPlane3D: true,
     theme: 'light',
   },
   cameraRequest: null,
   toast: null,
   activePresetId: null,
-  sidebarOpen: true,
+  sidebarOpen: typeof window !== 'undefined' ? window.innerWidth >= 900 : true,
+  multiSelectMode: false,
   past: [],
   future: [],
 
@@ -191,6 +194,7 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
   setTool2D: (tool) => set({ activeTool2D: tool, pendingIds: [] }),
   setTool3D: (tool) => set({ activeTool3D: tool, pendingIds: [] }),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
+  toggleMultiSelectMode: () => set((s) => ({ multiSelectMode: !s.multiSelectMode })),
   updateView: (partial) => set((s) => ({ view: { ...s.view, ...partial } })),
   requestCamera: (preset) => set({ cameraRequest: { preset, nonce: Date.now() } }),
   showToast: (text, tone = 'info') => set({ toast: { text, tone } }),
@@ -198,8 +202,9 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
 
   selectItem: (item, multi = false) =>
     set((s) => {
+      const useMulti = multi || s.multiSelectMode;
       const exists = s.selection.some((x) => x.domain === item.domain && x.type === item.type && x.id === item.id);
-      if (multi) {
+      if (useMulti) {
         return {
           selection: exists
             ? s.selection.filter((x) => !(x.domain === item.domain && x.type === item.type && x.id === item.id))
@@ -262,8 +267,8 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
       view: {
         ...s.view,
         showAxes: needsCoords,
-        showGrid: needsCoords,
-        showOxyPlane3D: false,
+        showGrid: true,
+        showOxyPlane3D: true,
       },
       selection: [],
       pendingIds: [],

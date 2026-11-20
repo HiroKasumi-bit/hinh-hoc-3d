@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowUpRight,
+  CheckSquare,
   Circle,
   Compass,
   Dot,
@@ -25,6 +26,8 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
   const activeTool3D = useGeometryStore((s) => s.activeTool3D);
   const setTool2D = useGeometryStore((s) => s.setTool2D);
   const setTool3D = useGeometryStore((s) => s.setTool3D);
+  const multiSelectMode = useGeometryStore((s) => s.multiSelectMode);
+  const toggleMultiSelectMode = useGeometryStore((s) => s.toggleMultiSelectMode);
   const view = useGeometryStore((s) => s.view);
   const addQuickSolid3D = useGeometryStore((s) => s.addQuickSolid3D);
   const addPoint3D = useGeometryStore((s) => s.addPoint3D);
@@ -114,11 +117,11 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
   return (
     <>
       <div
-        className={`z-20 flex shrink-0 flex-wrap items-center justify-between gap-1 border-b px-2.5 py-1.5 ${
+        className={`z-20 flex shrink-0 items-center justify-between gap-1.5 border-b px-2 py-1.5 ${
           isDark ? 'border-slate-800 bg-[#111827]/95' : 'border-[#E2E7EE] bg-white'
         }`}
       >
-        <div className="flex flex-wrap items-center gap-0.5">
+        <div className="no-scrollbar flex min-w-0 flex-1 flex-nowrap items-center gap-0.5 overflow-x-auto">
           {items.map((tool) => {
             const isActive = activeId === tool.id;
             return (
@@ -127,7 +130,7 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
                 type="button"
                 title={tool.label}
                 onClick={() => (domain === '2d' ? setTool2D(tool.id as Tool2D) : setTool3D(tool.id as Tool3D))}
-                className={`flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11.5px] font-medium transition-colors ${
+                className={`flex shrink-0 items-center gap-1 rounded-md px-2 py-1.5 text-[11.5px] font-medium transition-colors ${
                   isActive
                     ? 'bg-[#1D5CE5] text-white'
                     : isDark
@@ -136,20 +139,38 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
                 }`}
               >
                 {tool.icon}
-                {!compact && <span className="hidden xl:inline">{tool.short}</span>}
+                {!compact && <span className={tool.id === 'point' || tool.id === 'select' ? 'inline' : 'hidden xl:inline'}>{tool.short}</span>}
               </button>
             );
           })}
+
+          <div className={`mx-1 h-4 w-px shrink-0 ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
+
+          <button
+            type="button"
+            title="Bật chế độ chọn nhiều đối tượng bằng 1 chạm (rất tiện trên điện thoại)"
+            onClick={toggleMultiSelectMode}
+            className={`flex shrink-0 items-center gap-1 rounded-md border px-2 py-1.5 text-[11px] font-semibold transition-colors ${
+              multiSelectMode
+                ? 'border-[#1D5CE5] bg-[#1D5CE5]/12 text-[#1D5CE5]'
+                : isDark
+                ? 'border-slate-700 text-slate-300 hover:bg-slate-800'
+                : 'border-slate-200 text-slate-600 hover:bg-[#F2F5F9]'
+            }`}
+          >
+            <CheckSquare className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Chọn nhiều</span>
+          </button>
         </div>
 
         {domain === '3d' && (
           <button
             type="button"
             onClick={() => setBuilderOpen(true)}
-            className="flex shrink-0 items-center gap-1 rounded-md bg-[#0E9F6E] px-2.5 py-1 text-[11.5px] font-semibold text-white transition-colors hover:bg-[#0B835B]"
+            className="flex shrink-0 items-center gap-1 rounded-md bg-[#0E9F6E] px-2.5 py-1.5 text-[11.5px] font-semibold text-white transition-colors hover:bg-[#0B835B]"
           >
             <Plus className="h-3.5 w-3.5" />
-            <span>{compact ? 'Tạo 3D' : 'Hình khối & Oxyz'}</span>
+            <span>{compact ? 'Tạo 3D' : <><span className="sm:hidden">Tạo 3D</span><span className="hidden sm:inline">Hình khối & Oxyz</span></>}</span>
           </button>
         )}
       </div>

@@ -10,10 +10,13 @@
   body,
   #root {
     height: 100%;
+    height: 100dvh;
     width: 100%;
     margin: 0;
     padding: 0;
     overflow: hidden;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
     font-family: var(--font-sans);
   }
 }
@@ -21,6 +24,14 @@
 .font-math {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* Custom sleek scrollbar for object inspector */
@@ -59,8 +70,8 @@ input[type='range'].math-slider {
 input[type='range'].math-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: #1d5ce5;
   border: 2px solid #ffffff;
