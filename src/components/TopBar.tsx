@@ -8,6 +8,7 @@ import {
   Columns2,
   FolderOpen,
   Grid,
+  Keyboard,
   Moon,
   PanelLeft,
   Redo2,
@@ -22,6 +23,7 @@ import {
 import { useGeometryStore } from '../store/useGeometryStore';
 import { THPT_PRESETS } from '../presets/thptPresets';
 import { useViewportProfile } from '../hooks/useViewportProfile';
+import { ShortcutSettingsModal } from './ShortcutSettingsModal';
 import type { ViewMode } from '../types/geometry';
 
 export const TopBar: React.FC = () => {
@@ -43,14 +45,20 @@ export const TopBar: React.FC = () => {
   const showToast = useGeometryStore((s) => s.showToast);
 
   const [presetModalOpen, setPresetModalOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [gradeTab, setGradeTab] = useState<10 | 11 | 12>(11);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const vp = useViewportProfile();
 
   useEffect(() => {
     const onOpenPresets = () => setPresetModalOpen(true);
+    const onOpenShortcuts = () => setShortcutsOpen(true);
     window.addEventListener('hinhhocviet-open-presets', onOpenPresets);
-    return () => window.removeEventListener('hinhhocviet-open-presets', onOpenPresets);
+    window.addEventListener('hinhhocviet-open-shortcuts', onOpenShortcuts);
+    return () => {
+      window.removeEventListener('hinhhocviet-open-presets', onOpenPresets);
+      window.removeEventListener('hinhhocviet-open-shortcuts', onOpenShortcuts);
+    };
   }, []);
 
   useEffect(() => {
@@ -287,6 +295,18 @@ export const TopBar: React.FC = () => {
 
           <button
             type="button"
+            title="Cài đặt phím tắt"
+            aria-label="Cài đặt phím tắt"
+            onClick={() => setShortcutsOpen(true)}
+            className={`${vp.isPhonePortrait ? 'hidden' : 'inline-flex'} items-center gap-1 rounded-md p-1.5 text-xs font-medium transition-colors ${
+              isDark ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-slate-100 text-slate-600'
+            }`}
+          >
+            <Keyboard className="h-4 w-4" />
+          </button>
+
+          <button
+            type="button"
             title="Xóa sạch bảng vẽ"
             onClick={() => clearScene('all')}
             className={`rounded-md p-1.5 text-red-500 transition-colors ${
@@ -397,6 +417,8 @@ export const TopBar: React.FC = () => {
         </div>,
         document.body
       )}
+
+      <ShortcutSettingsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </>
   );
 };

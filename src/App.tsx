@@ -5,8 +5,10 @@ import { Canvas2D } from './components/Canvas2D';
 import { Viewport3D } from './components/Viewport3D';
 import { FloatingToolbar } from './components/FloatingToolbar';
 import { ContextActionBar } from './components/ContextActionBar';
+import { RenamePointModal } from './components/RenamePointModal';
 import { useGeometryStore } from './store/useGeometryStore';
 import { useViewportProfile } from './hooks/useViewportProfile';
+import { eventToShortcutString, type ShortcutActionId } from './types/shortcuts';
 
 class CanvasErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -83,28 +85,162 @@ export default function App() {
     return () => clearTimeout(t);
   }, [toast, clearToast]);
 
-  // Global keyboard shortcuts (Ctrl+Z, Ctrl+Y, Esc)
+  // Global keyboard shortcuts (Ctrl+Z, Ctrl+Y, Esc + fully customizable tool/rename/view shortcuts!)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      const st = useGeometryStore.getState();
+      if (st.renamingPoint) return;
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
-        if (e.shiftKey) redo();
-        else undo();
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        if (e.shiftKey) st.redo();
+        else st.undo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
         e.preventDefault();
-        redo();
-      } else if (e.key === 'Escape') {
-        setTool2D('select');
-        setTool3D('select');
-        clearSelection();
+        st.redo();
+        return;
+      }
+      if (e.key === 'Escape') {
+        st.setTool2D('select');
+        st.setTool3D('select');
+        st.clearSelection();
+        return;
+      }
+
+      const combo = eventToShortcutString(e);
+      if (!combo) return;
+
+      // Find matching custom shortcut action (plus F2 built-in alias for rename_point if F2 isn't bound elsewhere)
+      let matched: ShortcutActionId | null = null;
+      for (const [actionId, bound] of Object.entries(st.shortcuts) as Array<[ShortcutActionId, string]>) {
+        if (bound && bound === combo) {
+          matched = actionId;
+          break;
+        }
+      }
+      if (!matched && combo === 'F2') {
+        matched = 'rename_point';
+      }
+      if (!matched) return;
+
+      e.preventDefault();
+      const activeDomain: '2d' | '3d' = st.mode === '2d' ? '2d' : '3d';
+
+      switch (matched) {
+        case 'tool_select':
+          st.setTool2D('select');
+          st.setTool3D('select');
+          break;
+        case 'tool_point':
+          st.setTool2D('point');
+          st.setTool3D('point');
+          break;
+        case 'tool_segment':
+          st.setTool2D('segment');
+          st.setTool3D('segment');
+          break;
+        case 'tool_line':
+          st.setTool2D('line');
+          st.setTool3D('line');
+          break;
+        case 'tool_vector':
+          st.setTool2D('vector');
+          st.setTool3D('vector');
+          break;
+        case 'tool_midpoint':
+          st.setTool2D('midpoint');
+          st.setTool3D('midpoint');
+          break;
+        case 'tool_plane_or_polygon':
+          if (activeDomain === '2d') st.setTool2D('polygon');
+          else st.setTool3D('plane3p');
+          break;
+        case 'tool_section_or_perp':
+          if (activeDomain === '2d') st.setTool2D('perpendicular');
+          else st.setTool3D('crossSection');
+          break;
+        case 'tool_circle_or_builder':
+          if (activeDomain === '2d') st.setTool2D('circle');
+          else window.dispatchEvent(new Event('hinhhocviet-open-builder'));
+          break;
+        case 'tool_distance':
+          st.setTool2D('distance');
+          st.setTool3D('distance');
+          break;
+        case 'tool_angle':
+          st.setTool2D('angle');
+          st.setTool3D('angle');
+          break;
+        case 'rename_point': {
+          const ptSel = st.selection.find((x) => x.type === 'point');
+          if (ptSel) {
+            st.openRenamePoint(ptSel.domain, ptSel.id);
+          } else {
+            const ptsInDomain = activeDomain === '2d' ? st.scene2d.points : st.scene3d.points;
+            if (ptsInDomain.length === 1) {
+              st.openRenamePoint(activeDomain, ptsInDomain[0].id);
+            } else {
+              st.showToast('Hãy chọn 1 điểm trước khi sửa tên', 'info');
+            }
+          }
+          break;
+        }
+        case 'toggle_multi_select':
+          st.toggleMultiSelectMode();
+          st.showToast(
+            !st.multiSelectMode ? 'Đã bật chế độ Chọn nhiều điểm' : 'Đã tắt chế độ Chọn nhiều điểm',
+            'info'
+          );
+          break;
+        case 'delete_selected':
+          st.deleteSelection();
+          break;
+        case 'mode_2d':
+          st.setMode('2d');
+          break;
+        case 'mode_3d':
+          st.setMode('3d');
+          break;
+        case 'mode_split':
+          st.setMode('split');
+          break;
+        case 'open_builder_3d':
+          if (st.mode === '2d') st.setMode('3d');
+          window.dispatchEvent(new Event('hinhhocviet-open-builder'));
+          break;
+        case 'open_presets':
+          window.dispatchEvent(new Event('hinhhocviet-open-presets'));
+          break;
+        case 'toggle_axes':
+          st.updateView({ showAxes: !st.view.showAxes });
+          break;
+        case 'toggle_grid':
+          st.updateView({ showGrid: !st.view.showGrid });
+          break;
+        case 'toggle_hidden_edges':
+          st.updateView({ autoDashedHiddenEdges: !st.view.autoDashedHiddenEdges });
+          break;
+        case 'reset_camera':
+          st.requestCamera('oxyz');
+          break;
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [undo, redo, setTool2D, setTool3D, clearSelection]);
+  }, []);
 
   // Smooth slider animation loop for playing parameters (m, h, k)
   const hasPlayingSlider = sliders.some((s) => s.playing);
@@ -271,6 +407,7 @@ export default function App() {
           )}
         </main>
       </div>
+      <RenamePointModal />
     </div>
   );
 }

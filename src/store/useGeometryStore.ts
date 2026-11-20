@@ -19,6 +19,14 @@ import type {
   ViewMode,
   ViewSettings,
 } from '../types/geometry';
+import {
+  DEFAULT_SHORTCUTS,
+  loadSavedShortcuts,
+  saveShortcuts,
+  SHORTCUT_META,
+  type ShortcutActionId,
+  type ShortcutMap,
+} from '../types/shortcuts';
 import { EMPTY_SCENE_2D, EMPTY_SCENE_3D, THPT_PRESETS } from '../presets/thptPresets';
 import { parseSmartInput } from '../math/parser';
 import { formatNum, lineFrom2Points2D, resolvePoints2D } from '../math/geometry2d';
@@ -79,6 +87,8 @@ interface GeometryStore {
   activePresetId: string | null;
   sidebarOpen: boolean;
   multiSelectMode: boolean;
+  shortcuts: ShortcutMap;
+  renamingPoint: { domain: '2d' | '3d'; id: string } | null;
 
   past: SceneSnapshot[];
   future: SceneSnapshot[];
@@ -93,6 +103,14 @@ interface GeometryStore {
   requestCamera: (preset: CameraPreset3D) => void;
   showToast: (text: string, tone?: 'info' | 'success' | 'error') => void;
   clearToast: () => void;
+
+  // Point renaming & Custom Shortcuts
+  openRenamePoint: (domain: '2d' | '3d', id: string) => void;
+  closeRenamePoint: () => void;
+  renamePoint: (domain: '2d' | '3d', id: string, newName: string) => void;
+  setShortcut: (action: ShortcutActionId, keyCombo: string) => void;
+  resetShortcuts: () => void;
+  deleteSelection: () => void;
 
   // Selection
   selectItem: (item: SelectedItem, multi?: boolean) => void;
@@ -190,6 +208,8 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
       ? window.innerWidth >= 960 && window.innerHeight >= 540
       : true,
   multiSelectMode: false,
+  shortcuts: loadSavedShortcuts(),
+  renamingPoint: null,
   past: [],
   future: [],
 
@@ -202,6 +222,156 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
   requestCamera: (preset) => set({ cameraRequest: { preset, nonce: Date.now() } }),
   showToast: (text, tone = 'info') => set({ toast: { text, tone } }),
   clearToast: () => set({ toast: null }),
+
+  openRenamePoint: (domain, id) => set({ renamingPoint: { domain, id } }),
+  closeRenamePoint: () => set({ renamingPoint: null }),
+
+  renamePoint: (domain, id, rawName) => {
+    const trimmed = rawName.trim();
+    if (!trimmed) {
+      set({ toast: { text: 'Tên điểm không được để trống', tone: 'error' } });
+      return;
+    }
+    const state = get();
+    if (domain === '2d') {
+      const target = state.scene2d.points.find((p) => p.id === id);
+      if (!target) return;
+      if (target.name === trimmed) {
+        set({ renamingPoint: null });
+        return;
+      }
+      const oldName = target.name;
+      get().pushHistory();
+      set((s) => {
+        const nextPoints = s.scene2d.points.map((p) => (p.id === id ? { ...p, name: trimmed } : p));
+        const nameById = new Map(nextPoints.map((p) => [p.id, p.name]));
+        const nextSegments = s.scene2d.segments.map((seg) => {
+          if (seg.p1Id === id || seg.p2Id === id) {
+            const oldP1 = seg.p1Id === id ? oldName : nameById.get(seg.p1Id) ?? '';
+            const oldP2 = seg.p2Id === id ? oldName : nameById.get(seg.p2Id) ?? '';
+            if (seg.name === `${oldP1}${oldP2}`) {
+              return { ...seg, name: `${nameById.get(seg.p1Id) ?? ''}${nameById.get(seg.p2Id) ?? ''}` };
+            }
+          }
+          return seg;
+        });
+        return {
+          renamingPoint: null,
+          scene2d: { ...s.scene2d, points: nextPoints, segments: nextSegments },
+          toast: { text: `Đã đổi tên điểm ${oldName} → ${trimmed}`, tone: 'success' },
+        };
+      });
+    } else {
+      const target = state.scene3d.points.find((p) => p.id === id);
+      if (!target) return;
+      if (target.name === trimmed) {
+        set({ renamingPoint: null });
+        return;
+      }
+      const oldName = target.name;
+      get().pushHistory();
+      set((s) => {
+        const nextPoints = s.scene3d.points.map((p) => (p.id === id ? { ...p, name: trimmed } : p));
+        const nameById = new Map(nextPoints.map((p) => [p.id, p.name]));
+        const nextSegments = s.scene3d.segments.map((seg) => {
+          if (seg.p1Id === id || seg.p2Id === id) {
+            const oldP1 = seg.p1Id === id ? oldName : nameById.get(seg.p1Id) ?? '';
+            const oldP2 = seg.p2Id === id ? oldName : nameById.get(seg.p2Id) ?? '';
+            if (seg.name === `${oldP1}${oldP2}`) {
+              return { ...seg, name: `${nameById.get(seg.p1Id) ?? ''}${nameById.get(seg.p2Id) ?? ''}` };
+            }
+          }
+          return seg;
+        });
+        return {
+          renamingPoint: null,
+          scene3d: { ...s.scene3d, points: nextPoints, segments: nextSegments },
+          toast: { text: `Đã đổi tên điểm ${oldName} → ${trimmed}`, tone: 'success' },
+        };
+      });
+    }
+  },
+
+  setShortcut: (action, keyCombo) => {
+    set((s) => {
+      const next: ShortcutMap = { ...s.shortcuts };
+      let replacedLabel: string | null = null;
+      if (keyCombo) {
+        for (const [existingId, existingKey] of Object.entries(next) as Array<[ShortcutActionId, string]>) {
+          if (existingId !== action && existingKey === keyCombo) {
+            next[existingId] = '';
+            replacedLabel = SHORTCUT_META.find((m) => m.id === existingId)?.label ?? existingId;
+          }
+        }
+      }
+      next[action] = keyCombo;
+      saveShortcuts(next);
+      const curLabel = SHORTCUT_META.find((m) => m.id === action)?.label ?? action;
+      return {
+        shortcuts: next,
+        toast: keyCombo
+          ? {
+              text: replacedLabel
+                ? `Đã gán "${keyCombo}" cho ${curLabel} (đã gỡ khỏi "${replacedLabel}")`
+                : `Đã đổi phím tắt "${curLabel}" thành ${keyCombo}`,
+              tone: 'success',
+            }
+          : { text: `Đã gỡ phím tắt của "${curLabel}"`, tone: 'info' },
+      };
+    });
+  },
+
+  resetShortcuts: () => {
+    const fresh = { ...DEFAULT_SHORTCUTS };
+    saveShortcuts(fresh);
+    set({
+      shortcuts: fresh,
+      toast: { text: 'Đã khôi phục toàn bộ phím tắt mặc định', tone: 'success' },
+    });
+  },
+
+  deleteSelection: () => {
+    const sel = get().selection;
+    if (sel.length === 0) return;
+    get().pushHistory();
+    const mapKey = (domain: '2d' | '3d', t: SelectedItem['type']) => {
+      switch (t) {
+        case 'point': return 'points';
+        case 'segment': return 'segments';
+        case 'line': return 'lines';
+        case 'vector': return 'vectors';
+        case 'circle': return 'circles';
+        case 'conic': return 'conics';
+        case 'polygon': return 'polygons';
+        case 'function': return 'functions';
+        case 'inequality': return 'inequalities';
+        case 'plane': return 'planes';
+        case 'polyhedron': return 'polyhedra';
+        case 'solid': return 'solids';
+        case 'surface': return 'surfaces';
+        case 'crossSection': return 'crossSections';
+        case 'measurement': return domain === '2d' ? 'measures' : 'measurements';
+      }
+    };
+    set((s) => {
+      const next2d: Record<string, Array<{ id: string }>> = { ...(s.scene2d as unknown as Record<string, Array<{ id: string }>>) };
+      const next3d: Record<string, Array<{ id: string }>> = { ...(s.scene3d as unknown as Record<string, Array<{ id: string }>>) };
+      for (const item of sel) {
+        const key = mapKey(item.domain, item.type);
+        if (item.domain === '2d' && next2d[key]) {
+          next2d[key] = next2d[key].filter((x) => x.id !== item.id);
+        } else if (item.domain === '3d' && next3d[key]) {
+          next3d[key] = next3d[key].filter((x) => x.id !== item.id);
+        }
+      }
+      return {
+        selection: [],
+        scene2d: next2d as unknown as Scene2DState,
+        scene3d: next3d as unknown as Scene3DState,
+        toast: { text: `Đã xóa ${sel.length} đối tượng`, tone: 'info' },
+      };
+    });
+  },
 
   selectItem: (item, multi = false) =>
     set((s) => {

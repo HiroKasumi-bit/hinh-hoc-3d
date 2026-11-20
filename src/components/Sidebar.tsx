@@ -7,6 +7,7 @@ import {
   EyeOff,
   Keyboard,
   Pause,
+  Pencil,
   Play,
   Plus,
   Rotate3D,
@@ -80,6 +81,7 @@ export const Sidebar: React.FC = () => {
   const toggleSegment3DStyle = useGeometryStore((s) => s.toggleSegment3DStyle);
   const toggleFunctionIntegral = useGeometryStore((s) => s.toggleFunctionIntegral);
   const revolveFunctionTo3D = useGeometryStore((s) => s.revolveFunctionTo3D);
+  const openRenamePoint = useGeometryStore((s) => s.openRenamePoint);
   const setSidebarOpen = useGeometryStore((s) => s.setSidebarOpen);
 
   const [inputVal, setInputVal] = useState('');
@@ -164,15 +166,31 @@ export const Sidebar: React.FC = () => {
         {/* Compact Drawer Header (visible in both portrait & landscape phones) */}
         {vp.isCompact && (
           <div className={`flex shrink-0 items-center justify-between border-b px-3 py-2 ${isDark ? 'border-slate-800' : 'border-[#E2E7EE]'}`}>
-            <span className="text-xs font-bold">Nhập toán & Danh sách đối tượng</span>
-            <button
-              type="button"
-              aria-label="Đóng bảng bên"
-              onClick={() => setSidebarOpen(false)}
-              className={`rounded-md p-1.5 ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
-            >
-              <X className="h-4 w-4" />
-            </button>
+            <span className="text-xs font-bold">Nhập toán & Danh sách</span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                title="Cài đặt phím tắt"
+                onClick={() => {
+                  setSidebarOpen(false);
+                  window.dispatchEvent(new Event('hinhhocviet-open-shortcuts'));
+                }}
+                className={`flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium ${
+                  isDark ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                <Keyboard className="h-3.5 w-3.5" />
+                <span>Phím tắt</span>
+              </button>
+              <button
+                type="button"
+                aria-label="Đóng bảng bên"
+                onClick={() => setSidebarOpen(false)}
+                className={`rounded-md p-1.5 ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         )}
       {/* ==================== SMART MATH INPUT ==================== */}
@@ -610,6 +628,10 @@ export const Sidebar: React.FC = () => {
                     <div
                       key={pt.id}
                       onClick={(e) => selectItem({ domain: '3d', type: 'point', id: pt.id }, e.shiftKey || e.ctrlKey)}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        openRenamePoint('3d', pt.id);
+                      }}
                       className={`rounded-md border px-2.5 py-1.5 text-xs transition-colors cursor-pointer ${
                         sel
                           ? 'border-[#1D5CE5] bg-[#1D5CE5]/10'
@@ -625,6 +647,17 @@ export const Sidebar: React.FC = () => {
                           <span className="font-math text-[11px] opacity-75">{formatVec3(pos)}</span>
                         </div>
                         <div className="flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            title="Sửa tên điểm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openRenamePoint('3d', pt.id);
+                            }}
+                            className="rounded p-1 opacity-60 hover:text-[#1D5CE5] hover:opacity-100"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
                           <button type="button" onClick={(e) => { e.stopPropagation(); toggleVisibility('3d', 'point', pt.id); }} className="rounded p-1 opacity-60 hover:opacity-100">
                             {pt.visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
                           </button>
@@ -871,6 +904,10 @@ export const Sidebar: React.FC = () => {
                 <div
                   key={pt.id}
                   onClick={(e) => selectItem({ domain: '2d', type: 'point', id: pt.id }, e.shiftKey || e.ctrlKey)}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    openRenamePoint('2d', pt.id);
+                  }}
                   className={rowCls(isSelected('2d', 'point', pt.id))}
                 >
                   <div className="flex min-w-0 items-center gap-1.5">
@@ -880,9 +917,22 @@ export const Sidebar: React.FC = () => {
                       ({formatNum(pos[0])}; {formatNum(pos[1])})
                     </span>
                   </div>
-                  <button type="button" onClick={(e) => { e.stopPropagation(); deleteObject('2d', 'point', pt.id); }} className="rounded p-1 opacity-55 hover:text-red-500 hover:opacity-100">
-                    <Trash2 className="h-3 w-3" />
-                  </button>
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <button
+                      type="button"
+                      title="Sửa tên điểm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openRenamePoint('2d', pt.id);
+                      }}
+                      className="rounded p-1 opacity-60 hover:text-[#1D5CE5] hover:opacity-100"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                    <button type="button" onClick={(e) => { e.stopPropagation(); deleteObject('2d', 'point', pt.id); }} className="rounded p-1 opacity-55 hover:text-red-500 hover:opacity-100">
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
                 </div>
               );
             })}

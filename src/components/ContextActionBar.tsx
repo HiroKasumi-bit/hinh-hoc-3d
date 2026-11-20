@@ -1,7 +1,8 @@
 import React from 'react';
-import { ArrowDown, ArrowUp, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Pencil, X } from 'lucide-react';
 import { useGeometryStore } from '../store/useGeometryStore';
 import { formatNum } from '../math/geometry2d';
+import { formatShortcutBadge } from '../types/shortcuts';
 
 const TOOL_2D_HINTS: Record<string, string> = {
   point: 'Chạm bất kỳ vị trí nào để chấm điểm mới',
@@ -38,7 +39,10 @@ export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) 
   const selection = useGeometryStore((s) => s.selection).filter((x) => x.domain === domain);
   const clearSelection = useGeometryStore((s) => s.clearSelection);
   const view = useGeometryStore((s) => s.view);
+  const scene2d = useGeometryStore((s) => s.scene2d);
   const scene3d = useGeometryStore((s) => s.scene3d);
+  const shortcuts = useGeometryStore((s) => s.shortcuts);
+  const openRenamePoint = useGeometryStore((s) => s.openRenamePoint);
   const updatePoint3DCoords = useGeometryStore((s) => s.updatePoint3DCoords);
   const pushHistory = useGeometryStore((s) => s.pushHistory);
 
@@ -160,9 +164,40 @@ export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) 
   }
 
   if (actions.length === 0) {
+    const renameKey = shortcuts.rename_point ? formatShortcutBadge(shortcuts.rename_point) : '';
+
+    // Single 2D point selected -> instant Rename pill!
+    if (domain === '2d' && selection.length === 1 && pts.length === 1) {
+      const pt2 = scene2d.points.find((p) => p.id === pts[0].id);
+      if (pt2) {
+        return (
+          <div
+            className={`pointer-events-auto absolute bottom-3 left-1/2 z-20 flex max-w-[96%] -translate-x-1/2 flex-nowrap items-center gap-2 whitespace-nowrap rounded-xl border px-3 py-1.5 text-xs shadow-sm ${
+              isDark ? 'border-slate-700 bg-slate-900/95 text-slate-200' : 'border-[#DCE3EC] bg-white/96 text-[#0F1B2D]'
+            }`}
+          >
+            <span className="font-semibold text-[#1D5CE5]">Điểm {pt2.name}</span>
+            <button
+              type="button"
+              onClick={() => openRenamePoint('2d', pt2.id)}
+              className="flex items-center gap-1 rounded-md bg-[#1D5CE5] px-2.5 py-1 text-xs font-semibold text-white hover:bg-[#174CC2]"
+            >
+              <Pencil className="h-3 w-3" />
+              <span>Sửa tên</span>
+              {renameKey && <kbd className="font-math hidden rounded bg-white/20 px-1 text-[10px] sm:inline">{renameKey}</kbd>}
+            </button>
+            <button type="button" onClick={clearSelection} className="shrink-0 rounded p-1 hover:bg-slate-200/50">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        );
+      }
+    }
+
+    // Single 3D point selected -> Rename + Z-height stepper!
     if (domain === '3d' && selection.length === 1 && pts.length === 1) {
       const selectedPt = scene3d.points.find((p) => p.id === pts[0].id);
-      if (selectedPt && !selectedPt.computed) {
+      if (selectedPt) {
         const stepZ = (delta: number) => {
           pushHistory();
           const nextZ = Number((selectedPt.z + delta).toFixed(2));
@@ -175,32 +210,42 @@ export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) 
             }`}
           >
             <span className="font-semibold text-[#1D5CE5]">Điểm {selectedPt.name}</span>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                title="Hạ z xuống 0.5"
-                onClick={() => stepZ(-0.5)}
-                className={`flex items-center gap-0.5 rounded border px-2 py-1 font-math text-[11px] font-semibold ${
-                  isDark ? 'border-slate-700 bg-slate-800 hover:bg-slate-700' : 'border-slate-200 bg-[#F2F5F9] hover:bg-slate-200'
-                }`}
-              >
-                <ArrowDown className="h-3 w-3" />
-                0.5
-              </button>
-              <span className="font-math px-1.5 text-xs font-bold">z = {formatNum(selectedPt.z, 2)}</span>
-              <button
-                type="button"
-                title="Nâng z lên 0.5"
-                onClick={() => stepZ(0.5)}
-                className={`flex items-center gap-0.5 rounded border px-2 py-1 font-math text-[11px] font-semibold ${
-                  isDark ? 'border-slate-700 bg-slate-800 hover:bg-slate-700' : 'border-slate-200 bg-[#F2F5F9] hover:bg-slate-200'
-                }`}
-              >
-                <ArrowUp className="h-3 w-3" />
-                0.5
-              </button>
-            </div>
-            <span className="hidden text-[11px] opacity-65 lg:inline">· Nhấn giữ điểm kéo z</span>
+            <button
+              type="button"
+              onClick={() => openRenamePoint('3d', selectedPt.id)}
+              className="flex items-center gap-1 rounded-md bg-[#1D5CE5] px-2 py-1 text-[11px] font-semibold text-white hover:bg-[#174CC2]"
+            >
+              <Pencil className="h-3 w-3" />
+              <span>Sửa tên</span>
+              {renameKey && <kbd className="font-math hidden rounded bg-white/20 px-1 text-[9.5px] sm:inline">{renameKey}</kbd>}
+            </button>
+            {!selectedPt.computed && (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  title="Hạ z xuống 0.5"
+                  onClick={() => stepZ(-0.5)}
+                  className={`flex items-center gap-0.5 rounded border px-2 py-1 font-math text-[11px] font-semibold ${
+                    isDark ? 'border-slate-700 bg-slate-800 hover:bg-slate-700' : 'border-slate-200 bg-[#F2F5F9] hover:bg-slate-200'
+                  }`}
+                >
+                  <ArrowDown className="h-3 w-3" />
+                  0.5
+                </button>
+                <span className="font-math px-1 text-xs font-bold">z={formatNum(selectedPt.z, 2)}</span>
+                <button
+                  type="button"
+                  title="Nâng z lên 0.5"
+                  onClick={() => stepZ(0.5)}
+                  className={`flex items-center gap-0.5 rounded border px-2 py-1 font-math text-[11px] font-semibold ${
+                    isDark ? 'border-slate-700 bg-slate-800 hover:bg-slate-700' : 'border-slate-200 bg-[#F2F5F9] hover:bg-slate-200'
+                  }`}
+                >
+                  <ArrowUp className="h-3 w-3" />
+                  0.5
+                </button>
+              </div>
+            )}
             <button type="button" onClick={clearSelection} className="shrink-0 rounded p-1 hover:bg-slate-200/50">
               <X className="h-3.5 w-3.5" />
             </button>

@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useGeometryStore, type QuickSolid3DType } from '../store/useGeometryStore';
 import { useViewportProfile } from '../hooks/useViewportProfile';
+import { formatShortcutBadge, type ShortcutActionId } from '../types/shortcuts';
 import type { Tool2D, Tool3D } from '../types/geometry';
 
 export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean }> = ({ domain, compact = false }) => {
@@ -30,6 +31,7 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
   const setTool3D = useGeometryStore((s) => s.setTool3D);
   const multiSelectMode = useGeometryStore((s) => s.multiSelectMode);
   const toggleMultiSelectMode = useGeometryStore((s) => s.toggleMultiSelectMode);
+  const shortcuts = useGeometryStore((s) => s.shortcuts);
   const view = useGeometryStore((s) => s.view);
   const addQuickSolid3D = useGeometryStore((s) => s.addQuickSolid3D);
   const addPoint3D = useGeometryStore((s) => s.addPoint3D);
@@ -81,31 +83,31 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
 
   const isDark = view.theme === 'dark';
 
-  const tools2D: Array<{ id: Tool2D; label: string; short: string; icon: React.ReactNode }> = [
-    { id: 'select', label: 'Chọn / Kéo điểm', short: 'Chọn', icon: <MousePointer2 className="h-3.5 w-3.5" /> },
-    { id: 'point', label: 'Chấm điểm', short: 'Điểm', icon: <Dot className="h-4 w-4" /> },
-    { id: 'segment', label: 'Đoạn thẳng', short: 'Đoạn', icon: <Minus className="h-3.5 w-3.5" /> },
-    { id: 'line', label: 'Đường thẳng', short: 'Đường', icon: <MoveDiagonal className="h-3.5 w-3.5" /> },
-    { id: 'vector', label: 'Vectơ', short: 'Vectơ', icon: <ArrowUpRight className="h-3.5 w-3.5" /> },
-    { id: 'circle', label: 'Đường tròn', short: 'Tròn', icon: <Circle className="h-3.5 w-3.5" /> },
-    { id: 'polygon', label: 'Đa giác', short: 'Đa giác', icon: <Hexagon className="h-3.5 w-3.5" /> },
-    { id: 'midpoint', label: 'Trung điểm', short: 'T.điểm', icon: <Triangle className="h-3.5 w-3.5" /> },
-    { id: 'perpendicular', label: 'Đường vuông góc', short: 'Vuông góc', icon: <Square className="h-3.5 w-3.5" /> },
-    { id: 'angle', label: 'Đo góc', short: 'Góc', icon: <Compass className="h-3.5 w-3.5" /> },
-    { id: 'distance', label: 'Đo độ dài', short: 'Đo cạnh', icon: <Ruler className="h-3.5 w-3.5" /> },
+  const tools2D: Array<{ id: Tool2D; label: string; short: string; shortcutId: ShortcutActionId; icon: React.ReactNode }> = [
+    { id: 'select', label: 'Chọn / Kéo điểm', short: 'Chọn', shortcutId: 'tool_select', icon: <MousePointer2 className="h-3.5 w-3.5" /> },
+    { id: 'point', label: 'Chấm điểm', short: 'Điểm', shortcutId: 'tool_point', icon: <Dot className="h-4 w-4" /> },
+    { id: 'segment', label: 'Đoạn thẳng', short: 'Đoạn', shortcutId: 'tool_segment', icon: <Minus className="h-3.5 w-3.5" /> },
+    { id: 'line', label: 'Đường thẳng', short: 'Đường', shortcutId: 'tool_line', icon: <MoveDiagonal className="h-3.5 w-3.5" /> },
+    { id: 'vector', label: 'Vectơ', short: 'Vectơ', shortcutId: 'tool_vector', icon: <ArrowUpRight className="h-3.5 w-3.5" /> },
+    { id: 'circle', label: 'Đường tròn', short: 'Tròn', shortcutId: 'tool_circle_or_builder', icon: <Circle className="h-3.5 w-3.5" /> },
+    { id: 'polygon', label: 'Đa giác', short: 'Đa giác', shortcutId: 'tool_plane_or_polygon', icon: <Hexagon className="h-3.5 w-3.5" /> },
+    { id: 'midpoint', label: 'Trung điểm', short: 'T.điểm', shortcutId: 'tool_midpoint', icon: <Triangle className="h-3.5 w-3.5" /> },
+    { id: 'perpendicular', label: 'Đường vuông góc', short: 'Vuông góc', shortcutId: 'tool_section_or_perp', icon: <Square className="h-3.5 w-3.5" /> },
+    { id: 'angle', label: 'Đo góc', short: 'Góc', shortcutId: 'tool_angle', icon: <Compass className="h-3.5 w-3.5" /> },
+    { id: 'distance', label: 'Đo độ dài', short: 'Đo cạnh', shortcutId: 'tool_distance', icon: <Ruler className="h-3.5 w-3.5" /> },
   ];
 
-  const tools3D: Array<{ id: Tool3D; label: string; short: string; icon: React.ReactNode }> = [
-    { id: 'select', label: 'Chọn / Xoay 3D', short: 'Chọn', icon: <MousePointer2 className="h-3.5 w-3.5" /> },
-    { id: 'point', label: 'Chấm điểm trên (Oxy)', short: 'Điểm', icon: <Dot className="h-4 w-4" /> },
-    { id: 'segment', label: 'Nối đoạn thẳng', short: 'Đoạn', icon: <Minus className="h-3.5 w-3.5" /> },
-    { id: 'line', label: 'Đường thẳng Oxyz', short: 'Đường', icon: <MoveDiagonal className="h-3.5 w-3.5" /> },
-    { id: 'vector', label: 'Vectơ 3D', short: 'Vectơ', icon: <ArrowUpRight className="h-3.5 w-3.5" /> },
-    { id: 'plane3p', label: 'Mặt phẳng qua 3 điểm', short: 'Mặt phẳng', icon: <Layers className="h-3.5 w-3.5" /> },
-    { id: 'midpoint', label: 'Trung điểm', short: 'T.điểm', icon: <Triangle className="h-3.5 w-3.5" /> },
-    { id: 'crossSection', label: 'Cắt thiết diện (3 điểm)', short: 'Thiết diện', icon: <Scissors className="h-3.5 w-3.5" /> },
-    { id: 'distance', label: 'Đo khoảng cách', short: 'K.cách', icon: <Ruler className="h-3.5 w-3.5" /> },
-    { id: 'angle', label: 'Đo góc không gian', short: 'Góc', icon: <Compass className="h-3.5 w-3.5" /> },
+  const tools3D: Array<{ id: Tool3D; label: string; short: string; shortcutId: ShortcutActionId; icon: React.ReactNode }> = [
+    { id: 'select', label: 'Chọn / Xoay 3D', short: 'Chọn', shortcutId: 'tool_select', icon: <MousePointer2 className="h-3.5 w-3.5" /> },
+    { id: 'point', label: 'Chấm điểm (nhấn giữ kéo độ cao z)', short: 'Điểm', shortcutId: 'tool_point', icon: <Dot className="h-4 w-4" /> },
+    { id: 'segment', label: 'Nối đoạn thẳng', short: 'Đoạn', shortcutId: 'tool_segment', icon: <Minus className="h-3.5 w-3.5" /> },
+    { id: 'line', label: 'Đường thẳng Oxyz', short: 'Đường', shortcutId: 'tool_line', icon: <MoveDiagonal className="h-3.5 w-3.5" /> },
+    { id: 'vector', label: 'Vectơ 3D', short: 'Vectơ', shortcutId: 'tool_vector', icon: <ArrowUpRight className="h-3.5 w-3.5" /> },
+    { id: 'plane3p', label: 'Mặt phẳng qua 3 điểm', short: 'Mặt phẳng', shortcutId: 'tool_plane_or_polygon', icon: <Layers className="h-3.5 w-3.5" /> },
+    { id: 'midpoint', label: 'Trung điểm', short: 'T.điểm', shortcutId: 'tool_midpoint', icon: <Triangle className="h-3.5 w-3.5" /> },
+    { id: 'crossSection', label: 'Cắt thiết diện (3 điểm)', short: 'Thiết diện', shortcutId: 'tool_section_or_perp', icon: <Scissors className="h-3.5 w-3.5" /> },
+    { id: 'distance', label: 'Đo khoảng cách', short: 'K.cách', shortcutId: 'tool_distance', icon: <Ruler className="h-3.5 w-3.5" /> },
+    { id: 'angle', label: 'Đo góc không gian', short: 'Góc', shortcutId: 'tool_angle', icon: <Compass className="h-3.5 w-3.5" /> },
   ];
 
   const items = domain === '2d' ? tools2D : tools3D;
@@ -128,11 +130,12 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
         <div className="no-scrollbar flex min-w-0 flex-1 flex-nowrap items-center gap-0.5 overflow-x-auto">
           {items.map((tool) => {
             const isActive = activeId === tool.id;
+            const keyHint = shortcuts[tool.shortcutId];
             return (
               <button
                 key={tool.id}
                 type="button"
-                title={tool.label}
+                title={keyHint ? `${tool.label} (${formatShortcutBadge(keyHint)})` : tool.label}
                 onClick={() => (domain === '2d' ? setTool2D(tool.id as Tool2D) : setTool3D(tool.id as Tool3D))}
                 className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1.5 text-[11.5px] font-medium transition-colors ${
                   isActive
@@ -144,6 +147,15 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
               >
                 {tool.icon}
                 {!compact && <span className={tool.id === 'point' || tool.id === 'select' ? 'inline' : 'hidden xl:inline'}>{tool.short}</span>}
+                {!compact && keyHint && (
+                  <kbd
+                    className={`font-math hidden rounded px-1 text-[9.5px] font-semibold 2xl:inline ${
+                      isActive ? 'bg-white/20 text-white' : isDark ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    {formatShortcutBadge(keyHint)}
+                  </kbd>
+                )}
               </button>
             );
           })}
@@ -152,7 +164,7 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
 
           <button
             type="button"
-            title="Bật chế độ chọn nhiều đối tượng bằng 1 chạm (rất tiện trên điện thoại)"
+            title={`Bật/tắt chế độ chọn nhiều đối tượng bằng 1 chạm${shortcuts.toggle_multi_select ? ` (${formatShortcutBadge(shortcuts.toggle_multi_select)})` : ''}`}
             onClick={toggleMultiSelectMode}
             className={`flex shrink-0 items-center gap-1 rounded-md border px-2 py-1.5 text-[11px] font-semibold transition-colors ${
               multiSelectMode
