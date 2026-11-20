@@ -32,8 +32,10 @@ export const EMPTY_SCENE_3D = {
   polyhedra: [],
   solids: [],
   surfaces: [],
+  curves: [],
   crossSections: [],
   measurements: [],
+  nets: [],
 };
 
 export const THPT_PRESETS: ThptPreset[] = [

@@ -3,7 +3,7 @@ import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { GizmoHelper, GizmoViewport, Html, Line, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { Axis3D, Eye, Layers, SlidersHorizontal, Sparkles, X } from 'lucide-react';
+import { Axis3D, Crosshair, Eye, Layers, SlidersHorizontal, Sparkles, X } from 'lucide-react';
 import { useGeometryStore, type Construction3DDragTarget } from '../store/useGeometryStore';
 import { useViewportProfile } from '../hooks/useViewportProfile';
 import { compileExpression } from '../math/parser';
@@ -37,6 +37,8 @@ import {
 import type {
   CameraPreset3D,
   CrossSection3D,
+  Curve3D,
+  Net3D,
   Plane3D,
   Polyhedron3D,
   Segment3DSolidMode,
@@ -270,6 +272,11 @@ const AxesOxyz: React.FC<{ isDark: boolean; showAxes: boolean; showGrid: boolean
 
           {showLabels && (
             <>
+              <Label3D position={mathToScene([-0.26, -0.26, 0.08])}>
+                <span className="font-math pointer-events-none select-none text-[11px] font-bold" style={{ color: tickColor }}>
+                  O
+                </span>
+              </Label3D>
               <Label3D position={mathToScene([axisLen + 0.48, 0, 0])}>
                 <span className="pointer-events-none select-none font-bold text-xs text-red-600">x</span>
               </Label3D>
@@ -281,6 +288,9 @@ const AxesOxyz: React.FC<{ isDark: boolean; showAxes: boolean; showGrid: boolean
               </Label3D>
               {[-4, -2, 2, 4].map((v) => (
                 <React.Fragment key={v}>
+                  <Line points={[mathToScene([v, -0.1, 0]), mathToScene([v, 0.1, 0])]} color="#DC2626" lineWidth={1.2} />
+                  <Line points={[mathToScene([-0.1, v, 0]), mathToScene([0.1, v, 0])]} color="#16A34A" lineWidth={1.2} />
+                  {v > 0 && <Line points={[mathToScene([-0.1, 0, v]), mathToScene([0.1, 0, v])]} color="#2563EB" lineWidth={1.2} />}
                   <Label3D position={mathToScene([v, -0.25, 0])}>
                     <span className="font-math pointer-events-none select-none text-[10px]" style={{ color: tickColor }}>
                       {v}
@@ -946,6 +956,180 @@ const Surface3DRenderer: React.FC<{ surface: Surface3D; sliderScope: Record<stri
   );
 };
 
+// ==================== INTERACTIVE 3D->2D POLYHEDRON NET & OXY FUNCTION CURVES ====================
+
+function faceCentroidScene(pts: THREE.Vector3[]): THREE.Vector3 {
+  const c = new THREE.Vector3();
+  for (const p of pts) c.add(p);
+  return c.divideScalar(Math.max(1, pts.length));
+}
+
+function makePivotRotation(pivot: THREE.Vector3, axisUnit: THREE.Vector3, angleRad: number): THREE.Matrix4 {
+  const t1 = new THREE.Matrix4().makeTranslation(-pivot.x, -pivot.y, -pivot.z);
+  const rot = new THREE.Matrix4().makeRotationAxis(axisUnit, angleRad);
+  const t2 = new THREE.Matrix4().makeTranslation(pivot.x, pivot.y, pivot.z);
+  return t2.multiply(rot).multiply(t1);
+}
+
+const Net3DRenderer: React.FC<{
+  net: Net3D;
+  poly: Polyhedron3D | undefined;
+  ptMap: Map<string, Vec3>;
+  unfoldT: number;
+  isDark: boolean;
+}> = ({ net, poly, ptMap, unfoldT, isDark }) => {
+  const unfoldedFaces = useMemo(() => {
+    if (!poly || poly.faces.length === 0) return [];
+    const facePts = poly.faces.map((f) =>
+      f.map((id) => new THREE.Vector3(...mathToScene(ptMap.get(id) ?? [0, 0, 0])))
+    );
+    // Root face = lowest math Z (largest scene Y smallest)
+    let rootIdx = 0;
+    let lowestY = Infinity;
+    for (let i = 0; i < facePts.length; i++) {
+      const avgY = facePts[i].reduce((acc, v) => acc + v.y, 0) / Math.max(1, facePts[i].length);
+      if (avgY < lowestY) {
+        lowestY = avgY;
+        rootIdx = i;
+      }
+    }
+
+    const visited = new Set<number>([rootIdx]);
+    const mats = new Map<number, THREE.Matrix4>([[rootIdx, new THREE.Matrix4()]]);
+    const queue: number[] = [rootIdx];
+
+    while (queue.length > 0) {
+      const pIdx = queue.shift()!;
+      const pIds = poly.faces[pIdx];
+      const pPts = facePts[pIdx];
+      const pCent = faceCentroidScene(pPts);
+      const pMat = mats.get(pIdx)!;
+
+      for (let ei = 0; ei < pIds.length; ei++) {
+        const uId = pIds[ei];
+        const vId = pIds[(ei + 1) % pIds.length];
+
+        for (let cIdx = 0; cIdx < poly.faces.length; cIdx++) {
+          if (visited.has(cIdx)) continue;
+          const cIds = poly.faces[cIdx];
+          if (!cIds.includes(uId) || !cIds.includes(vId)) continue;
+
+          visited.add(cIdx);
+          const pA = new THREE.Vector3(...mathToScene(ptMap.get(uId) ?? [0, 0, 0]));
+          const pB = new THREE.Vector3(...mathToScene(ptMap.get(vId) ?? [0, 0, 0]));
+          const dir = pB.clone().sub(pA).normalize();
+          const mEdge = pA.clone().add(pB).multiplyScalar(0.5);
+
+          // Vector in parent face perpendicular to edge pointing outward from parent centroid
+          const toP = pCent.clone().sub(mEdge);
+          const inParentFromCent = toP.clone().sub(dir.clone().multiplyScalar(toP.dot(dir)));
+          const outwardTarget = inParentFromCent.lengthSq() > 1e-6 ? inParentFromCent.normalize().negate() : new THREE.Vector3(1, 0, 0);
+
+          // Vector in child face perpendicular to edge pointing toward child centroid
+          const cCent = faceCentroidScene(facePts[cIdx]);
+          const toC = cCent.clone().sub(mEdge);
+          const childPerp = toC.clone().sub(dir.clone().multiplyScalar(toC.dot(dir)));
+          let theta = 0;
+          if (childPerp.lengthSq() > 1e-6) {
+            childPerp.normalize();
+            const crossVec = new THREE.Vector3().crossVectors(childPerp, outwardTarget);
+            theta = Math.atan2(crossVec.dot(dir), childPerp.dot(outwardTarget));
+          }
+
+          const localFold = makePivotRotation(pA, dir, unfoldT * theta);
+          const cMat = new THREE.Matrix4().multiplyMatrices(pMat, localFold);
+          mats.set(cIdx, cMat);
+          queue.push(cIdx);
+        }
+      }
+    }
+
+    return facePts.map((pts, idx) => {
+      const m = mats.get(idx) ?? new THREE.Matrix4();
+      const transformed = pts.map((v) => v.clone().applyMatrix4(m));
+      const positions: number[] = [];
+      for (let i = 1; i < transformed.length - 1; i++) {
+        positions.push(
+          transformed[0].x, transformed[0].y, transformed[0].z,
+          transformed[i].x, transformed[i].y, transformed[i].z,
+          transformed[i + 1].x, transformed[i + 1].y, transformed[i + 1].z
+        );
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geo.computeVertexNormals();
+      const loop: Array<[number, number, number]> = transformed.map((v) => [v.x, v.y, v.z]);
+      if (loop.length > 0) loop.push(loop[0]);
+      return { geo, loop };
+    });
+  }, [poly, ptMap, unfoldT]);
+
+  useEffect(() => {
+    return () => {
+      for (const f of unfoldedFaces) f.geo.dispose();
+    };
+  }, [unfoldedFaces]);
+
+  if (!poly || unfoldedFaces.length === 0) return null;
+
+  return (
+    <group>
+      {unfoldedFaces.map((f, idx) => (
+        <group key={idx}>
+          <mesh geometry={f.geo}>
+            <meshStandardMaterial
+              color={net.color}
+              transparent
+              opacity={0.34}
+              side={THREE.DoubleSide}
+              depthWrite={false}
+              roughness={0.45}
+            />
+          </mesh>
+          <Line points={f.loop} color={isDark ? '#E2E8F0' : '#0F1B2D'} lineWidth={2.1} />
+        </group>
+      ))}
+    </group>
+  );
+};
+
+const Curve3DRenderer: React.FC<{ curve: Curve3D; sliderScope: Record<string, number> }> = ({
+  curve,
+  sliderScope,
+}) => {
+  const pts = useMemo(() => {
+    try {
+      const compiled = compileExpression(curve.expr);
+      const chunks: Array<Array<[number, number, number]>> = [];
+      let cur: Array<[number, number, number]> = [];
+      let prevY = 0;
+      for (let i = 0; i <= 220; i++) {
+        const x = -6 + (12 * i) / 220;
+        const y = compiled.eval({ ...sliderScope, x });
+        if (!Number.isFinite(y) || Math.abs(y) > 8 || (cur.length > 0 && Math.abs(y - prevY) > 6)) {
+          if (cur.length >= 2) chunks.push(cur);
+          cur = [];
+        } else {
+          cur.push(mathToScene([x, y, 0.02]));
+          prevY = y;
+        }
+      }
+      if (cur.length >= 2) chunks.push(cur);
+      return chunks;
+    } catch {
+      return [];
+    }
+  }, [curve.expr, sliderScope]);
+
+  return (
+    <group>
+      {pts.map((seg, idx) => (
+        <Line key={idx} points={seg} color={curve.color} lineWidth={2.5} />
+      ))}
+    </group>
+  );
+};
+
 // ==================== LIVE 3D CONSTRUCTION RUBBER-BAND & GHOST SOLID PREVIEW ====================
 
 function computeSquareBase3D(p1: Vec3, p2: Vec3): { p3: Vec3; p4: Vec3; side: number } {
@@ -965,12 +1149,13 @@ const ConstructionPreview3D: React.FC<{
   activeTool3D: Tool3D;
   segment3DMode: Segment3DSolidMode;
   pendingIds: string[];
+  closedBase3D: string[];
   ptMap: Map<string, Vec3>;
   hoveredPointId: string | null;
   hoverGroundPos: Vec3 | null;
   snapToGrid: boolean;
   isDark: boolean;
-}> = ({ activeTool3D, segment3DMode, pendingIds, ptMap, hoveredPointId, hoverGroundPos, snapToGrid, isDark }) => {
+}> = ({ activeTool3D, segment3DMode, pendingIds, closedBase3D, ptMap, hoveredPointId, hoverGroundPos, snapToGrid, isDark }) => {
   if (activeTool3D === 'select') return null;
 
   const targetPos: Vec3 | null = hoveredPointId ? ptMap.get(hoveredPointId) ?? hoverGroundPos : hoverGroundPos;
@@ -987,8 +1172,135 @@ const ConstructionPreview3D: React.FC<{
   }, [hoverGroundPos, hoveredPointId]);
 
   const pendingPts = pendingIds.map((id) => ptMap.get(id)).filter((p): p is Vec3 => Boolean(p));
+  const closedBasePts = closedBase3D.map((id) => ptMap.get(id)).filter((p): p is Vec3 => Boolean(p));
 
   const renderToolPreview = () => {
+    // 0. GeoGebra 2-Click Tetrahedron & Cube Previews
+    if ((activeTool3D === 'tetrahedron' || activeTool3D === 'cube') && pendingPts.length === 1 && targetPos) {
+      const p1 = pendingPts[0];
+      const p2 = targetPos;
+      if (dist3(p1, p2) < 0.08) return null;
+
+      if (activeTool3D === 'tetrahedron') {
+        const u = sub3(p2, p1);
+        const side = Math.max(0.5, len3(u));
+        let perp: Vec3 = [-u[1], u[0], 0];
+        if (len3(perp) < 1e-4) perp = [0, 1, 0];
+        else perp = normalize3(perp);
+        const triH = (side * Math.sqrt(3)) / 2;
+        const mid: Vec3 = [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2, (p1[2] + p2[2]) / 2];
+        const p3: Vec3 = [mid[0] + perp[0] * triH, mid[1] + perp[1] * triH, mid[2]];
+        const g = centroid3([p1, p2, p3]);
+        const sPos: Vec3 = [g[0], g[1], g[2] + side * Math.sqrt(2 / 3)];
+        return (
+          <group>
+            <Line points={[mathToScene(p1), mathToScene(p2), mathToScene(p3), mathToScene(p1)]} color="#0E9F6E" lineWidth={2.6} />
+            <Line points={[mathToScene(sPos), mathToScene(p1)]} color="#E06D1F" lineWidth={2} dashed dashSize={0.18} gapSize={0.11} />
+            <Line points={[mathToScene(sPos), mathToScene(p2)]} color="#E06D1F" lineWidth={2} dashed dashSize={0.18} gapSize={0.11} />
+            <Line points={[mathToScene(sPos), mathToScene(p3)]} color="#E06D1F" lineWidth={2} dashed dashSize={0.18} gapSize={0.11} />
+          </group>
+        );
+      }
+
+      const { p3, p4, side } = computeSquareBase3D(p1, p2);
+      const p1T: Vec3 = [p1[0], p1[1], p1[2] + side];
+      const p2T: Vec3 = [p2[0], p2[1], p2[2] + side];
+      const p3T: Vec3 = [p3[0], p3[1], p3[2] + side];
+      const p4T: Vec3 = [p4[0], p4[1], p4[2] + side];
+      return (
+        <group>
+          <Line points={[mathToScene(p1), mathToScene(p2), mathToScene(p3), mathToScene(p4), mathToScene(p1)]} color="#7C3AED" lineWidth={2.6} />
+          <Line points={[mathToScene(p1T), mathToScene(p2T), mathToScene(p3T), mathToScene(p4T), mathToScene(p1T)]} color="#7C3AED" lineWidth={2} dashed dashSize={0.16} gapSize={0.1} />
+          <Line points={[mathToScene(p1), mathToScene(p1T)]} color="#7C3AED" lineWidth={1.8} dashed dashSize={0.16} gapSize={0.1} />
+          <Line points={[mathToScene(p2), mathToScene(p2T)]} color="#7C3AED" lineWidth={1.8} dashed dashSize={0.16} gapSize={0.1} />
+          <Line points={[mathToScene(p3), mathToScene(p3T)]} color="#7C3AED" lineWidth={1.8} dashed dashSize={0.16} gapSize={0.1} />
+          <Line points={[mathToScene(p4), mathToScene(p4T)]} color="#7C3AED" lineWidth={1.8} dashed dashSize={0.16} gapSize={0.1} />
+        </group>
+      );
+    }
+
+    // 0b. GeoGebra Cone & Cylinder 2-Click Preview
+    if ((activeTool3D === 'cone' || activeTool3D === 'cylinder') && pendingPts.length === 1 && targetPos) {
+      const c = pendingPts[0];
+      const r = dist3(c, targetPos);
+      if (r < 0.08) return null;
+      const h = Math.max(2.5, r * 1.5);
+      const ringBot: Array<[number, number, number]> = [];
+      const ringTop: Array<[number, number, number]> = [];
+      for (let i = 0; i <= 36; i++) {
+        const t = (i / 36) * Math.PI * 2;
+        ringBot.push(mathToScene([c[0] + r * Math.cos(t), c[1] + r * Math.sin(t), c[2]]));
+        ringTop.push(mathToScene([c[0] + r * Math.cos(t), c[1] + r * Math.sin(t), c[2] + h]));
+      }
+      const sPos: Vec3 = [c[0], c[1], c[2] + h];
+      return (
+        <group>
+          <Line points={ringBot} color="#E06D1F" lineWidth={2.4} />
+          {activeTool3D === 'cylinder' ? (
+            <Line points={ringTop} color="#0891B2" lineWidth={2} dashed dashSize={0.18} gapSize={0.1} />
+          ) : (
+            <>
+              <Line points={[mathToScene(sPos), mathToScene([c[0] + r, c[1], c[2]])]} color="#E06D1F" lineWidth={1.8} dashed dashSize={0.16} gapSize={0.1} />
+              <Line points={[mathToScene(sPos), mathToScene([c[0] - r, c[1], c[2]])]} color="#E06D1F" lineWidth={1.8} dashed dashSize={0.16} gapSize={0.1} />
+            </>
+          )}
+        </group>
+      );
+    }
+
+    // 0c. GeoGebra Pyramid & Prism Multi-Point Polygon Base + Apex Preview
+    if (
+      activeTool3D === 'pyramid' ||
+      activeTool3D === 'prism' ||
+      activeTool3D === 'extrudePyramid' ||
+      activeTool3D === 'extrudePrism'
+    ) {
+      if (closedBasePts.length >= 3) {
+        const loop = [...closedBasePts.map(mathToScene), mathToScene(closedBasePts[0])];
+        const g = centroid3(closedBasePts);
+        const target = targetPos ?? [g[0], g[1], g[2] + 3.2];
+        const apex: Vec3 = [target[0], target[1], Math.abs(target[2] - g[2]) < 0.25 ? g[2] + 3.2 : target[2]];
+        return (
+          <group>
+            <Line points={loop} color="#E06D1F" lineWidth={3} />
+            {activeTool3D === 'pyramid' || activeTool3D === 'extrudePyramid'
+              ? closedBasePts.map((bp, idx) => (
+                  <Line key={idx} points={[mathToScene(apex), mathToScene(bp)]} color="#E06D1F" lineWidth={2} dashed dashSize={0.16} gapSize={0.1} />
+                ))
+              : closedBasePts.map((bp, idx) => (
+                  <Line
+                    key={idx}
+                    points={[mathToScene(bp), mathToScene([bp[0], bp[1], bp[2] + 3.2])]}
+                    color="#0891B2"
+                    lineWidth={2}
+                    dashed
+                    dashSize={0.16}
+                    gapSize={0.1}
+                  />
+                ))}
+          </group>
+        );
+      }
+
+      if (pendingPts.length >= 1) {
+        const polyPts = pendingPts.map(mathToScene);
+        if (targetPos) polyPts.push(mathToScene(targetPos));
+        return (
+          <group>
+            {polyPts.length >= 2 && <Line points={polyPts} color="#E06D1F" lineWidth={2.6} dashed dashSize={0.18} gapSize={0.1} />}
+            {pendingPts.length >= 3 && (
+              <Label3D position={mathToScene([pendingPts[0][0], pendingPts[0][1], pendingPts[0][2] + 0.42])}>
+                <span className="pointer-events-none select-none rounded bg-[#0E9F6E] px-1.5 py-0.5 text-[10px] font-bold text-white shadow-xs">
+                  Chạm lại để khép đáy
+                </span>
+              </Label3D>
+            )}
+          </group>
+        );
+      }
+      return null;
+    }
+
     if (!targetPos || pendingPts.length === 0) return null;
 
     // 1. Integrated Smart Segment Tool:
@@ -1265,10 +1577,13 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
   const view = useGeometryStore((s) => s.view);
   const selection = useGeometryStore((s) => s.selection);
   const pendingIds = useGeometryStore((s) => s.pendingIds);
+  const closedBase3D = useGeometryStore((s) => s.closedBase3D);
   const activeTool3D = useGeometryStore((s) => s.activeTool3D);
   const segment3DMode = useGeometryStore((s) => s.segment3DMode);
   const handlePoint3DClick = useGeometryStore((s) => s.handlePoint3DClick);
   const handleGround3DConstructionClick = useGeometryStore((s) => s.handleGround3DConstructionClick);
+  const createNetForPolyhedron = useGeometryStore((s) => s.createNetForPolyhedron);
+  const extrudePolyhedronToSolid = useGeometryStore((s) => s.extrudePolyhedronToSolid);
   const selectItem = useGeometryStore((s) => s.selectItem);
   const addPoint3D = useGeometryStore((s) => s.addPoint3D);
   const updatePoint3DCoords = useGeometryStore((s) => s.updatePoint3DCoords);
@@ -1684,6 +1999,7 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
         activeTool3D={activeTool3D}
         segment3DMode={segment3DMode}
         pendingIds={pendingIds}
+        closedBase3D={closedBase3D}
         ptMap={ptMap}
         hoveredPointId={hoveredPointId}
         hoverGroundPos={hoverGroundPos}
@@ -1694,21 +2010,46 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
       {/* Active live Z-elevation visual guide rail & ground drop-line */}
       {zHud && <ZElevationGuide hud={zHud} isDark={isDark} />}
 
-      {/* Polyhedra */}
-      {scene3d.polyhedra.map(
-        (poly) =>
-          poly.visible && (
-            <PolyhedronRenderer
-              key={poly.id}
-              poly={poly}
-              ptMap={ptMap}
-              autoDashedGlobal={view.autoDashedHiddenEdges}
-              globalOpacity={view.globalFaceOpacity}
-              isDark={isDark}
-              isSelected={selection.some((x) => x.domain === '3d' && x.type === 'polyhedron' && x.id === poly.id)}
-              onSelect={(multi) => selectItem({ domain: '3d', type: 'polyhedron', id: poly.id }, multi)}
-            />
-          )
+      {/* Polyhedra (hidden when an interactive unfolded Net3D is visible for the same polyhedron) */}
+      {scene3d.polyhedra.map((poly) => {
+        if (!poly.visible) return null;
+        const hasVisibleNet = (scene3d.nets ?? []).some((n) => n.visible && n.polyhedronId === poly.id);
+        if (hasVisibleNet) return null;
+        return (
+          <PolyhedronRenderer
+            key={poly.id}
+            poly={poly}
+            ptMap={ptMap}
+            autoDashedGlobal={view.autoDashedHiddenEdges}
+            globalOpacity={view.globalFaceOpacity}
+            isDark={isDark}
+            isSelected={selection.some((x) => x.domain === '3d' && x.type === 'polyhedron' && x.id === poly.id)}
+            onSelect={(multi) => {
+              if (activeTool3D === 'net') {
+                createNetForPolyhedron(poly.id);
+              } else if (activeTool3D === 'extrudePyramid') {
+                extrudePolyhedronToSolid(poly.id, 'pyramid');
+              } else if (activeTool3D === 'extrudePrism') {
+                extrudePolyhedronToSolid(poly.id, 'prism');
+              } else {
+                selectItem({ domain: '3d', type: 'polyhedron', id: poly.id }, multi);
+              }
+            }}
+          />
+        );
+      })}
+
+      {/* Interactive 3D -> 2D Unfolding Nets */}
+      {(scene3d.nets ?? []).map((net) => {
+        if (!net.visible) return null;
+        const poly = scene3d.polyhedra.find((p) => p.id === net.polyhedronId);
+        const unfoldT = sliderScope[net.sliderName] ?? 0.72;
+        return <Net3DRenderer key={net.id} net={net} poly={poly} ptMap={ptMap} unfoldT={unfoldT} isDark={isDark} />;
+      })}
+
+      {/* 2D Function Curves plotted on the 3D Oxy plane */}
+      {(scene3d.curves ?? []).map(
+        (cv) => cv.visible && <Curve3DRenderer key={cv.id} curve={cv} sliderScope={sliderScope} />
       )}
 
       {/* Cross Sections */}
@@ -2019,18 +2360,73 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
         const isHover = hoveredPointId === pt.id;
         return (
           <group key={pt.id}>
-            {/* Subtle elevation drop-line when selected or hovered and off ground plane */}
-            {(isSel || isHover) && !isDraggingZ && Math.abs(pos[2]) > 0.05 && (
-              <Line
-                points={[mathToScene([pos[0], pos[1], 0]), scenePos]}
-                color={isHover ? '#0284C7' : '#1D5CE5'}
-                lineWidth={isHover ? 1.7 : 1.3}
-                dashed
-                dashSize={0.14}
-                gapSize={0.1}
-                transparent
-                opacity={isHover ? 0.75 : 0.55}
-              />
+            {/* Full Oxyz coordinate drop-lines when Oxyz axes are visible and point is hovered/selected/dragged */}
+            {view.showAxes && (view.showCoordProjections ?? true) && (isSel || isHover || isDraggingZ) ? (
+              <>
+                {Math.abs(pos[2]) > 0.05 && (
+                  <Line
+                    points={[mathToScene([pos[0], pos[1], 0]), scenePos]}
+                    color="#2563EB"
+                    lineWidth={isHover ? 1.8 : 1.4}
+                    dashed
+                    dashSize={0.14}
+                    gapSize={0.09}
+                    transparent
+                    opacity={0.78}
+                  />
+                )}
+                {Math.abs(pos[1]) > 0.05 && (
+                  <Line
+                    points={[mathToScene([pos[0], pos[1], 0]), mathToScene([pos[0], 0, 0])]}
+                    color="#16A34A"
+                    lineWidth={1.3}
+                    dashed
+                    dashSize={0.14}
+                    gapSize={0.09}
+                    transparent
+                    opacity={0.7}
+                  />
+                )}
+                {Math.abs(pos[0]) > 0.05 && (
+                  <Line
+                    points={[mathToScene([pos[0], pos[1], 0]), mathToScene([0, pos[1], 0])]}
+                    color="#DC2626"
+                    lineWidth={1.3}
+                    dashed
+                    dashSize={0.14}
+                    gapSize={0.09}
+                    transparent
+                    opacity={0.7}
+                  />
+                )}
+                {Math.abs(pos[2]) > 0.05 && (Math.abs(pos[0]) > 0.05 || Math.abs(pos[1]) > 0.05) && (
+                  <Line
+                    points={[scenePos, mathToScene([0, 0, pos[2]])]}
+                    color="#2563EB"
+                    lineWidth={1.2}
+                    dashed
+                    dashSize={0.14}
+                    gapSize={0.09}
+                    transparent
+                    opacity={0.58}
+                  />
+                )}
+              </>
+            ) : (
+              (isSel || isHover) &&
+              !isDraggingZ &&
+              Math.abs(pos[2]) > 0.05 && (
+                <Line
+                  points={[mathToScene([pos[0], pos[1], 0]), scenePos]}
+                  color={isHover ? '#0284C7' : '#1D5CE5'}
+                  lineWidth={isHover ? 1.7 : 1.3}
+                  dashed
+                  dashSize={0.14}
+                  gapSize={0.1}
+                  transparent
+                  opacity={isHover ? 0.75 : 0.55}
+                />
+              )
             )}
 
             <group position={scenePos}>
@@ -2125,6 +2521,9 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
                     }`}
                   >
                     {pt.name}
+                    {view.showAxes && (isSel || isHover || isDraggingZ)
+                      ? `(${formatNum(pos[0], 1)}; ${formatNum(pos[1], 1)}; ${formatNum(pos[2], 1)})`
+                      : ''}
                   </span>
                 </Label3D>
               )}
@@ -2233,6 +2632,21 @@ export const Viewport3D: React.FC = () => {
         >
           <Layers className="h-3.5 w-3.5" />
           <span>Mặt phẳng đáy</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => updateView({ showCoordProjections: !(view.showCoordProjections ?? true) })}
+          className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-left font-medium transition-colors ${
+            (view.showCoordProjections ?? true)
+              ? 'bg-[#0284C7]/12 text-[#0284C7]'
+              : isDark
+              ? 'text-slate-400 hover:bg-slate-800'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Crosshair className="h-3.5 w-3.5" />
+          <span>Đường gióng tọa độ</span>
         </button>
 
         <div className="flex flex-col gap-1 px-1 pt-0.5">

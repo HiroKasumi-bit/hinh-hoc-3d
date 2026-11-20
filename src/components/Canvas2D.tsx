@@ -1,13 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Focus, Minus, Plus } from 'lucide-react';
 import { useGeometryStore } from '../store/useGeometryStore';
-import { compileExpression } from '../math/parser';
+import { compileExpression, safeEval } from '../math/parser';
 import {
   analyzeFunction2D,
   angle3Points2D,
   computeIntegral2D,
   dist2D,
   distPointToLine2D,
+  evalDerivative2D,
+  findFunctionIntersections2D,
   formatNum,
   polygonArea2D,
   resolveLine2D,
@@ -154,6 +156,24 @@ export const Canvas2D: React.FC = () => {
       return null;
     },
     [scene2d.lines, ptMap, screenToWorld, cam.scale]
+  );
+
+  const findCurveSnap = useCallback(
+    (wx: number, cursorSy: number) => {
+      let best: { fn: (typeof scene2d.functions)[number]; x: number; y: number; distPx: number } | null = null;
+      for (const fn of scene2d.functions) {
+        if (!fn.visible) continue;
+        const wy = safeEval(fn.expr, { ...sliderScope, x: wx });
+        if (!Number.isFinite(wy) || Math.abs(wy) > 1e5) continue;
+        const [, curveSy] = worldToScreen(wx, wy);
+        const distPx = Math.abs(curveSy - cursorSy);
+        if (distPx <= 16 && (!best || distPx < best.distPx)) {
+          best = { fn, x: wx, y: wy, distPx };
+        }
+      }
+      return best;
+    },
+    [scene2d.functions, sliderScope, worldToScreen]
   );
 
   // ==================== MAIN CANVAS RENDER ====================
@@ -643,6 +663,101 @@ export const Canvas2D: React.FC = () => {
           ctx.stroke();
           ctx.restore();
         }
+        if (analysis.yIntercept !== null && Number.isFinite(analysis.yIntercept)) {
+          const [yx, yy] = worldToScreen(0, analysis.yIntercept);
+          if (yy >= -20 && yy <= size.height + 20) {
+            ctx.save();
+            ctx.fillStyle = '#E06D1F';
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 1.6;
+            ctx.beginPath();
+            ctx.arc(yx, yy, 4.2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            if (view.showLabels) {
+              drawBadge(ctx, `(0; ${formatNum(analysis.yIntercept, 2)})`, yx + 36, yy - 12, '#E06D1F', isDark);
+            }
+            ctx.restore();
+          }
+        }
+      }
+
+      // 7e. Tangent line & coordinate projections at x0
+      if (fn.tangent?.enabled) {
+        const x0 = fn.tangent.x0;
+        const y0 = evalF(x0);
+        const k = evalDerivative2D(fn.expr, x0, sliderScope);
+        if (Number.isFinite(y0) && k !== null && Number.isFinite(k)) {
+          const [p1x, p1y] = worldToScreen(xMin, y0 + k * (xMin - x0));
+          const [p2x, p2y] = worldToScreen(xMax, y0 + k * (xMax - x0));
+          const [tx, ty] = worldToScreen(x0, y0);
+          const [oxTick] = worldToScreen(x0, 0);
+          const [, oyTick] = worldToScreen(0, y0);
+          const [oyAxisX, oxAxisY] = worldToScreen(0, 0);
+
+          ctx.save();
+          ctx.strokeStyle = '#E06D1F';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(p1x, p1y);
+          ctx.lineTo(p2x, p2y);
+          ctx.stroke();
+
+          ctx.globalAlpha = 0.72;
+          ctx.lineWidth = 1.3;
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.moveTo(tx, ty);
+          ctx.lineTo(oxTick, oxAxisY);
+          ctx.moveTo(tx, ty);
+          ctx.lineTo(oyAxisX, oyTick);
+          ctx.stroke();
+
+          ctx.globalAlpha = 1;
+          ctx.setLineDash([]);
+          ctx.fillStyle = '#E06D1F';
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(tx, ty, 5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+
+          if (view.showLabels) {
+            drawBadge(ctx, `T(${formatNum(x0, 2)}; ${formatNum(y0, 2)})`, tx, ty - 18, '#E06D1F', isDark);
+          }
+          ctx.restore();
+        }
+      }
+    }
+
+    // 7f. Function-function intersections
+    const visibleFns = scene2d.functions.filter((f) => f.visible);
+    for (let i = 0; i < visibleFns.length; i++) {
+      for (let j = i + 1; j < visibleFns.length; j++) {
+        const pts = findFunctionIntersections2D(
+          visibleFns[i].expr,
+          visibleFns[j].expr,
+          xMin,
+          xMax,
+          sliderScope
+        );
+        for (const [ix, iy] of pts) {
+          const [sx, sy] = worldToScreen(ix, iy);
+          if (sx < -20 || sx > size.width + 20 || sy < -20 || sy > size.height + 20) continue;
+          ctx.save();
+          ctx.fillStyle = '#7C3AED';
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(sx, sy, 4.8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          if (view.showLabels) {
+            drawBadge(ctx, `(${formatNum(ix, 2)}; ${formatNum(iy, 2)})`, sx, sy - 16, '#7C3AED', isDark);
+          }
+          ctx.restore();
+        }
       }
     }
 
@@ -769,6 +884,50 @@ export const Canvas2D: React.FC = () => {
       }
     }
 
+    // 11b. Live 2D function curve snap & coordinate drop-lines on hover
+    if (!hoverPointId && hoverWorld && dragRef.current.kind === 'none' && scene2d.functions.length > 0) {
+      const [, cursorSy] = worldToScreen(hoverWorld[0], hoverWorld[1]);
+      const curveHit = findCurveSnap(hoverWorld[0], cursorSy);
+      if (curveHit) {
+        const [cx, cy] = worldToScreen(curveHit.x, curveHit.y);
+        const [axisX, axisY] = worldToScreen(0, 0);
+        const slope = evalDerivative2D(curveHit.fn.expr, curveHit.x, sliderScope);
+        ctx.save();
+        ctx.strokeStyle = curveHit.fn.color;
+        ctx.globalAlpha = 0.75;
+        ctx.lineWidth = 1.4;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx, axisY);
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(axisX, cy);
+        ctx.stroke();
+
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = curveHit.fn.color;
+        ctx.beginPath();
+        ctx.arc(cx, axisY, 3, 0, Math.PI * 2);
+        ctx.arc(axisX, cy, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 5.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        const badgeText =
+          `(${formatNum(curveHit.x, 2)}; ${formatNum(curveHit.y, 2)})` +
+          (slope !== null && Number.isFinite(slope) ? ` · f'=${formatNum(slope, 2)}` : '');
+        drawBadge(ctx, badgeText, cx, cy - 20, curveHit.fn.color, isDark);
+        ctx.restore();
+      }
+    }
+
     // 12. Live rubber-band preview for active 2D construction tools
     if (activeTool2D !== 'select' && activeTool2D !== 'point' && pendingIds.length > 0) {
       const pts = pendingIds.map((id) => ptMap.get(id)).filter((p): p is Vec2 => Boolean(p));
@@ -860,6 +1019,7 @@ export const Canvas2D: React.FC = () => {
     activeTool2D,
     worldToScreen,
     screenToWorld,
+    findCurveSnap,
   ]);
 
   // ==================== POINTER EVENTS ====================
@@ -873,6 +1033,17 @@ export const Canvas2D: React.FC = () => {
     if (!view.snapToGrid) return [Number(w[0].toFixed(2)), Number(w[1].toFixed(2))];
     const step = 0.5;
     return [Math.round(w[0] / step) * step, Math.round(w[1] / step) * step];
+  };
+
+  const resolveClickCoord = (sx: number, sy: number, hitPt: string | null): Vec2 => {
+    const rawWorld = screenToWorld(sx, sy);
+    if (activeTool2D === 'point' && !hitPt) {
+      const curveHit = findCurveSnap(rawWorld[0], sy);
+      if (curveHit) {
+        return [Number(curveHit.x.toFixed(3)), Number(curveHit.y.toFixed(3))];
+      }
+    }
+    return snapCoord(rawWorld);
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -915,10 +1086,8 @@ export const Canvas2D: React.FC = () => {
       }
     }
 
-    const rawWorld = screenToWorld(sx, sy);
-    const snapped = snapCoord(rawWorld);
     const hitLine = findHitLine(sx, sy);
-    handleCanvas2DClick(snapped, hitPt ?? undefined, hitLine ?? undefined);
+    handleCanvas2DClick(resolveClickCoord(sx, sy, hitPt), hitPt ?? undefined, hitLine ?? undefined);
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -980,7 +1149,7 @@ export const Canvas2D: React.FC = () => {
     if (!d.moved && (d.kind === 'pan' || d.kind === 'point')) {
       const hitPt = findHitPoint(sx, sy);
       const hitLine = findHitLine(sx, sy);
-      handleCanvas2DClick(snapCoord(screenToWorld(sx, sy)), hitPt ?? undefined, hitLine ?? undefined);
+      handleCanvas2DClick(resolveClickCoord(sx, sy, hitPt), hitPt ?? undefined, hitLine ?? undefined);
     }
   };
 

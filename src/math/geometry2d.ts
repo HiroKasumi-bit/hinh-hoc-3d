@@ -354,6 +354,84 @@ export function analyzeFunction2D(
   return result;
 }
 
+export function evalDerivative2D(expr: string, x: number, scope: Record<string, number> = {}): number {
+  try {
+    const compiled = compileExpression(expr);
+    const h = 1e-5;
+    const y1 = compiled.eval({ ...scope, x: x + h });
+    const y0 = compiled.eval({ ...scope, x: x - h });
+    if (!Number.isFinite(y1) || !Number.isFinite(y0)) return NaN;
+    return (y1 - y0) / (2 * h);
+  } catch {
+    return NaN;
+  }
+}
+
+export function findFunctionIntersections2D(
+  expr1: string,
+  expr2: string,
+  xMin: number,
+  xMax: number,
+  scope: Record<string, number> = {}
+): Vec2[] {
+  let c1, c2;
+  try {
+    c1 = compileExpression(expr1);
+    c2 = compileExpression(expr2);
+  } catch {
+    return [];
+  }
+
+  const diff = (x: number) => {
+    const y1 = c1.eval({ ...scope, x });
+    const y2 = c2.eval({ ...scope, x });
+    if (!Number.isFinite(y1) || !Number.isFinite(y2)) return NaN;
+    return y1 - y2;
+  };
+
+  const results: Vec2[] = [];
+  const samples = 320;
+  const dx = (xMax - xMin) / samples;
+  let prevX = xMin;
+  let prevD = diff(prevX);
+
+  for (let i = 1; i <= samples; i++) {
+    const x = xMin + i * dx;
+    const d = diff(x);
+    if (Number.isFinite(prevD) && Number.isFinite(d) && prevD * d <= 0 && Math.abs(d - prevD) < 30) {
+      let lo = prevX;
+      let hi = x;
+      let dLo = prevD;
+      for (let iter = 0; iter < 24; iter++) {
+        const mid = (lo + hi) / 2;
+        const dm = diff(mid);
+        if (!Number.isFinite(dm)) break;
+        if (Math.abs(dm) < 1e-9) {
+          lo = hi = mid;
+          break;
+        }
+        if (dLo * dm <= 0) hi = mid;
+        else {
+          lo = mid;
+          dLo = dm;
+        }
+      }
+      const rx = (lo + hi) / 2;
+      const dFinal = diff(rx);
+      const ry = c1.eval({ ...scope, x: rx });
+      if (Number.isFinite(dFinal) && Math.abs(dFinal) < 1e-2 && Number.isFinite(ry)) {
+        if (!results.some((p) => Math.abs(p[0] - rx) < 0.06)) {
+          results.push([rx, ry]);
+        }
+      }
+    }
+    prevX = x;
+    prevD = d;
+  }
+
+  return results;
+}
+
 /** Simpson's rule numerical integration for Lớp 12 integrals & revolution volumes */
 export function computeIntegral2D(
   expr: string,

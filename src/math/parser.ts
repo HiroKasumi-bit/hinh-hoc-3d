@@ -560,11 +560,11 @@ export function parseSmartInput(
     if (keyword.startsWith('thiết') || keyword.startsWith('thiet')) return { kind: 'viCommand', action: 'crossSection', targets };
   }
 
-  // 2. Point / Vector shorthand: "A(1, 2, 3)", "A = (1, 2, 3)", "u = (1, -2, 3)", "(2, 3)"
-  const ptMatch = norm.match(/^([A-Za-z][A-Za-z0-9_']*)?\s*=?\s*\(([^()]+)\)$/);
+  // 2. Point / Vector shorthand: "A(1, 2, 3)", "A(1; 2; 3)", "A = (1; 2; 3)", "u = (1; -2; 3)", "(2; 3)"
+  const ptMatch = norm.match(/^([A-Za-z][A-Za-z0-9_']*)?\s*=?\s*\((.+)\)$/);
   if (ptMatch) {
     const label = ptMatch[1]?.trim();
-    const parts = ptMatch[2].split(',').map((p) => p.trim());
+    const parts = ptMatch[2].split(/[,;]/).map((p) => p.trim());
     if (parts.length === 2 || parts.length === 3) {
       const vals = parts.map((p) => safeEval(p, sliderScope));
       if (vals.every((v) => Number.isFinite(v))) {

@@ -9,6 +9,7 @@ import {
   FolderOpen,
   Grid,
   Keyboard,
+  Lock,
   Moon,
   PanelLeft,
   Redo2,
@@ -24,6 +25,7 @@ import { useGeometryStore } from '../store/useGeometryStore';
 import { THPT_PRESETS } from '../presets/thptPresets';
 import { useViewportProfile } from '../hooks/useViewportProfile';
 import { ShortcutSettingsModal } from './ShortcutSettingsModal';
+import { ProblemSolverModal } from './ProblemSolverModal';
 import type { ViewMode } from '../types/geometry';
 
 export const TopBar: React.FC = () => {
@@ -45,6 +47,7 @@ export const TopBar: React.FC = () => {
   const showToast = useGeometryStore((s) => s.showToast);
 
   const [presetModalOpen, setPresetModalOpen] = useState(false);
+  const [problemModalOpen, setProblemModalOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [gradeTab, setGradeTab] = useState<10 | 11 | 12>(11);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -52,11 +55,14 @@ export const TopBar: React.FC = () => {
 
   useEffect(() => {
     const onOpenPresets = () => setPresetModalOpen(true);
+    const onOpenProblemSolver = () => setProblemModalOpen(true);
     const onOpenShortcuts = () => setShortcutsOpen(true);
     window.addEventListener('hinhhocviet-open-presets', onOpenPresets);
+    window.addEventListener('hinhhocviet-open-problem-solver', onOpenProblemSolver);
     window.addEventListener('hinhhocviet-open-shortcuts', onOpenShortcuts);
     return () => {
       window.removeEventListener('hinhhocviet-open-presets', onOpenPresets);
+      window.removeEventListener('hinhhocviet-open-problem-solver', onOpenProblemSolver);
       window.removeEventListener('hinhhocviet-open-shortcuts', onOpenShortcuts);
     };
   }, []);
@@ -193,8 +199,18 @@ export const TopBar: React.FC = () => {
           })}
         </div>
 
-        {/* Right: THPT Presets + Utility Controls */}
+        {/* Right: Problem Solver + THPT Presets + Utility Controls */}
         <div className="flex items-center gap-0.5 sm:gap-1">
+          <button
+            type="button"
+            title="Nhập đề bài toán tiếng Việt để tự động vẽ hình (có khóa bảo mật)"
+            onClick={() => setProblemModalOpen(true)}
+            className="flex items-center gap-1 rounded-md bg-[#7C3AED] px-2 py-1 text-xs font-semibold text-white transition-colors hover:bg-[#6D28D9] sm:px-2.5 sm:py-1.5"
+          >
+            <Lock className="h-3.5 w-3.5" />
+            <span>{vp.isCompact ? 'Đề bài' : 'Đề bài → Hình'}</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setPresetModalOpen(true)}
@@ -419,6 +435,7 @@ export const TopBar: React.FC = () => {
       )}
 
       <ShortcutSettingsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <ProblemSolverModal open={problemModalOpen} onClose={() => setProblemModalOpen(false)} />
     </>
   );
 };

@@ -17,7 +17,7 @@ export type Tool2D =
   | 'angle'
   | 'distance';
 
-export type Segment3DSolidMode = 'box' | 'tetrahedron' | 'pyramid4' | 'segmentOnly';
+export type Segment3DSolidMode = 'tetrahedron' | 'pyramid4' | 'box' | 'segmentOnly';
 
 export type Tool3D =
   | 'select'
@@ -31,7 +31,17 @@ export type Tool3D =
   | 'footPlane'
   | 'crossSection'
   | 'distance'
-  | 'angle';
+  | 'angle'
+  // GeoGebra 3D Solid Dropdown tools:
+  | 'pyramid'
+  | 'prism'
+  | 'extrudePyramid'
+  | 'extrudePrism'
+  | 'tetrahedron'
+  | 'cube'
+  | 'cone'
+  | 'cylinder'
+  | 'net';
 
 export interface ParamSlider {
   id: string;
@@ -155,6 +165,11 @@ export interface Function2D {
   showExtrema: boolean;
   showAsymptotes: boolean;
   showRoots: boolean;
+  showTable?: boolean;
+  tangent?: {
+    enabled: boolean;
+    x0: number;
+  };
   integral?: {
     enabled: boolean;
     a: number;
@@ -331,6 +346,23 @@ export interface Measurement3D {
   visible: boolean;
 }
 
+export interface Net3D {
+  id: string;
+  name: string;
+  polyhedronId: string;
+  sliderName: string;
+  color: string;
+  visible: boolean;
+}
+
+export interface Curve3D {
+  id: string;
+  name: string;
+  expr: string;
+  color: string;
+  visible: boolean;
+}
+
 export type CameraPreset3D = 'oxyz' | 'top' | 'front' | 'side' | 'iso';
 
 export interface Scene2DState {
@@ -355,8 +387,10 @@ export interface Scene3DState {
   polyhedra: Polyhedron3D[];
   solids: Solid3D[];
   surfaces: Surface3D[];
+  curves?: Curve3D[];
   crossSections: CrossSection3D[];
   measurements: Measurement3D[];
+  nets?: Net3D[];
 }
 
 export interface SceneSnapshot {
@@ -373,6 +407,7 @@ export interface ViewSettings {
   autoDashedHiddenEdges: boolean;
   globalFaceOpacity: number;
   showOxyPlane3D: boolean;
+  showCoordProjections?: boolean;
   theme: ThemeMode;
 }
 
@@ -392,7 +427,9 @@ export interface SelectedItem {
     | 'polyhedron'
     | 'solid'
     | 'surface'
+    | 'curve'
     | 'crossSection'
-    | 'measurement';
+    | 'measurement'
+    | 'net';
   id: string;
 }

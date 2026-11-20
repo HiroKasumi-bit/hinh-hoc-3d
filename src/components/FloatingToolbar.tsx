@@ -1,21 +1,28 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  ArrowUpFromLine,
   ArrowUpRight,
+  Box,
   CheckSquare,
+  ChevronDown,
   Circle,
   Compass,
+  Cylinder,
   Dot,
   Hexagon,
   Layers,
   Minus,
   MousePointer2,
   MoveDiagonal,
+  Orbit,
   Plus,
+  Pyramid,
   Ruler,
   Scissors,
   Square,
   Triangle,
+  UnfoldHorizontal,
   X,
 } from 'lucide-react';
 import { useGeometryStore, type QuickSolid3DType } from '../store/useGeometryStore';
@@ -40,6 +47,108 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
 
   const [builderOpen, setBuilderOpen] = useState(false);
   const [builderTab, setBuilderTab] = useState<'poly' | 'round' | 'oxyz'>('poly');
+  const [solidMenuOpen, setSolidMenuOpen] = useState(false);
+  const [solidMenuPos, setSolidMenuPos] = useState<{ top: number; left: number }>({ top: 90, left: 160 });
+  const solidBtnRef = useRef<HTMLButtonElement>(null);
+
+  const SOLID_MENU_TOOLS: Array<{
+    id: Tool3D | 'revolveOpen';
+    label: string;
+    desc: string;
+    icon: React.ReactNode;
+  }> = [
+    {
+      id: 'pyramid',
+      label: 'Hình chóp',
+      desc: 'Chọn đa giác đáy rồi chọn đỉnh S',
+      icon: <Pyramid className="h-4 w-4 text-[#E06D1F]" />,
+    },
+    {
+      id: 'prism',
+      label: 'Lăng trụ',
+      desc: 'Chọn đa giác đáy rồi chọn chiều cao mặt trên',
+      icon: <Hexagon className="h-4 w-4 text-[#0891B2]" />,
+    },
+    {
+      id: 'extrudePyramid',
+      label: 'Đùn thành Hình chóp',
+      desc: 'Chọn đáy đa giác rồi dựng thành hình chóp',
+      icon: <ArrowUpFromLine className="h-4 w-4 text-[#E06D1F]" />,
+    },
+    {
+      id: 'extrudePrism',
+      label: 'Đùn thành Lăng trụ',
+      desc: 'Chọn đáy đa giác rồi dựng thành lăng trụ đứng',
+      icon: <ArrowUpFromLine className="h-4 w-4 text-[#0891B2]" />,
+    },
+    {
+      id: 'cone',
+      label: 'Hình nón',
+      desc: 'Chọn tâm đáy O rồi điểm bán kính R',
+      icon: <Triangle className="h-4 w-4 text-[#E06D1F]" />,
+    },
+    {
+      id: 'cylinder',
+      label: 'Hình trụ',
+      desc: 'Chọn tâm đáy O rồi điểm bán kính R',
+      icon: <Cylinder className="h-4 w-4 text-[#0891B2]" />,
+    },
+    {
+      id: 'tetrahedron',
+      label: 'Tứ diện đều (2 điểm)',
+      desc: 'Chọn 2 điểm A → B ra ngay tứ diện đều S.ABC',
+      icon: <Triangle className="h-4 w-4 text-[#0E9F6E]" />,
+    },
+    {
+      id: 'cube',
+      label: 'Hình lập phương (2 điểm)',
+      desc: 'Chọn 2 điểm A → B ra ngay hình lập phương',
+      icon: <Box className="h-4 w-4 text-[#7C3AED]" />,
+    },
+    {
+      id: 'net',
+      label: 'Trải phẳng (Net)',
+      desc: 'Chạm vào khối đa diện để mở phẳng 3D → 2D',
+      icon: <UnfoldHorizontal className="h-4 w-4 text-[#1D5CE5]" />,
+    },
+    {
+      id: 'revolveOpen',
+      label: 'Mặt tròn xoay',
+      desc: 'Tạo khối nón / trụ / cầu / quay quanh Ox',
+      icon: <Orbit className="h-4 w-4 text-[#DB2777]" />,
+    },
+  ];
+
+  const isSolidToolActive =
+    domain === '3d' &&
+    SOLID_MENU_TOOLS.some((t) => t.id !== 'revolveOpen' && t.id === activeTool3D);
+  const activeSolidEntry = SOLID_MENU_TOOLS.find((t) => t.id === activeTool3D) ?? SOLID_MENU_TOOLS[0];
+
+  useEffect(() => {
+    if (!solidMenuOpen) return;
+    const onClose = () => setSolidMenuOpen(false);
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSolidMenuOpen(false);
+    };
+    window.addEventListener('keydown', onEsc);
+    window.addEventListener('resize', onClose);
+    return () => {
+      window.removeEventListener('keydown', onEsc);
+      window.removeEventListener('resize', onClose);
+    };
+  }, [solidMenuOpen]);
+
+  const toggleSolidMenu = () => {
+    if (!solidMenuOpen && solidBtnRef.current) {
+      const rect = solidBtnRef.current.getBoundingClientRect();
+      const maxLeft = Math.max(8, window.innerWidth - 280);
+      setSolidMenuPos({
+        top: rect.bottom + 6,
+        left: Math.min(maxLeft, Math.max(8, rect.left)),
+      });
+    }
+    setSolidMenuOpen((v) => !v);
+  };
 
   useEffect(() => {
     if (domain !== '3d') return;
@@ -170,6 +279,33 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
             );
           })}
 
+          {/* GeoGebra-style Unified 3D Solids Dropdown Button */}
+          {domain === '3d' && (
+            <div className="relative flex shrink-0 items-center">
+              <button
+                ref={solidBtnRef}
+                type="button"
+                title="Công cụ Khối 3D kiểu GeoGebra (Hình chóp, Lăng trụ, Tứ diện, Lập phương, Nón, Trụ, Trải phẳng...)"
+                onClick={toggleSolidMenu}
+                className={`flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11.5px] font-semibold transition-colors ${
+                  isSolidToolActive
+                    ? 'border-[#1D5CE5] bg-[#1D5CE5] text-white'
+                    : isDark
+                    ? 'border-slate-700 bg-slate-800/80 text-slate-200 hover:bg-slate-800'
+                    : 'border-[#DCE3EC] bg-[#FAFBFD] text-[#0F1B2D] hover:bg-[#F2F5F9]'
+                }`}
+              >
+                {isSolidToolActive ? (
+                  <span className="[&>svg]:text-white">{activeSolidEntry.icon}</span>
+                ) : (
+                  <Pyramid className="h-3.5 w-3.5 text-[#E06D1F]" />
+                )}
+                {!compact && <span>{isSolidToolActive ? activeSolidEntry.label.split(' (')[0] : 'Khối 3D'}</span>}
+                <ChevronDown className={`h-3 w-3 transition-transform ${solidMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
+          )}
+
           <div className={`mx-0.5 h-4 w-px shrink-0 ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
 
           <button
@@ -200,6 +336,58 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
           </button>
         )}
       </div>
+
+      {/* ==================== GEOGEBRA 3D SOLIDS DROPDOWN MENU ==================== */}
+      {solidMenuOpen &&
+        createPortal(
+          <div className="fixed inset-0 z-[70]" onClick={() => setSolidMenuOpen(false)}>
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{ top: solidMenuPos.top, left: solidMenuPos.left }}
+              className={`fixed flex max-h-[72dvh] w-68 flex-col overflow-y-auto rounded-xl border p-1.5 shadow-xl ${
+                isDark ? 'border-slate-700 bg-[#111827] text-slate-100' : 'border-[#DCE3EC] bg-white text-[#0F1B2D]'
+              }`}
+            >
+              <div className={`px-2.5 py-1 text-[10.5px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                Công cụ Khối Không Gian (GeoGebra 3D)
+              </div>
+              {SOLID_MENU_TOOLS.map((item) => {
+                const active = item.id !== 'revolveOpen' && activeTool3D === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setSolidMenuOpen(false);
+                      if (item.id === 'revolveOpen') {
+                        setBuilderTab('round');
+                        setBuilderOpen(true);
+                      } else {
+                        setTool3D(item.id);
+                      }
+                    }}
+                    className={`flex items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                      active
+                        ? 'bg-[#1D5CE5]/12 text-[#1D5CE5]'
+                        : isDark
+                        ? 'hover:bg-slate-800'
+                        : 'hover:bg-[#F2F5F9]'
+                    }`}
+                  >
+                    <span className="mt-0.5 shrink-0">{item.icon}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-xs font-semibold leading-tight">{item.label}</span>
+                      <span className={`block text-[10.5px] leading-snug ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                        {item.desc}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>,
+          document.body
+        )}
 
       {/* ==================== 1-CLICK 3D SOLID & OXYZ BUILDER MODAL ==================== */}
       {builderOpen &&

@@ -30,12 +30,21 @@ const TOOL_3D_HINTS: Record<string, string> = {
   crossSection: 'Chạm 3 điểm trên hình khối để cắt ra đa giác Thiết diện',
   distance: 'Chạm 2 điểm để đo độ dài (hoặc bật "Chọn nhiều" để chọn điểm & mặt phẳng)',
   angle: 'Chạm 3 điểm A → B (đỉnh) → C để đo góc không gian ∠ABC',
+  pyramid: 'Chạm lần lượt các đỉnh đáy (rồi chạm lại đỉnh đầu hoặc bấm "Chốt đáy"), sau đó chọn đỉnh chóp S',
+  prism: 'Chạm lần lượt các đỉnh đáy (rồi chạm lại đỉnh đầu hoặc bấm "Chốt đáy"), sau đó chọn chiều cao mặt trên',
+  extrudePyramid: 'Chạm khối đa diện hoặc chấm các đỉnh đáy để đùn thành Hình chóp',
+  extrudePrism: 'Chạm khối đa diện hoặc chấm các đỉnh đáy để đùn thành Lăng trụ đứng',
+  tetrahedron: 'Chạm 2 điểm A → B để dựng ngay Tứ diện đều S.ABC (kiểu GeoGebra)',
+  cube: 'Chạm 2 điểm A → B để dựng ngay Hình lập phương (kiểu GeoGebra)',
+  cone: 'Chạm tâm đáy O rồi chạm điểm bán kính R để dựng Hình nón',
+  cylinder: 'Chạm tâm đáy O rồi chạm điểm bán kính R để dựng Hình trụ',
+  net: 'Chạm vào bất kỳ khối đa diện 3D nào để trải phẳng (Net) ↔ gập khối',
 };
 
 const SEGMENT_3D_MODE_OPTIONS: Array<{ id: Segment3DSolidMode; label: string }> = [
-  { id: 'box', label: 'Hình hộp' },
   { id: 'tetrahedron', label: 'Chóp tứ diện' },
   { id: 'pyramid4', label: 'Chóp tứ giác' },
+  { id: 'box', label: 'Hình hộp' },
   { id: 'segmentOnly', label: 'Chỉ nối đoạn' },
 ];
 
@@ -47,7 +56,9 @@ export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) 
   const setTool3D = useGeometryStore((s) => s.setTool3D);
   const setSegment3DMode = useGeometryStore((s) => s.setSegment3DMode);
   const finishPendingSegment3D = useGeometryStore((s) => s.finishPendingSegment3D);
+  const closeBase3DPolygon = useGeometryStore((s) => s.closeBase3DPolygon);
   const pendingIds = useGeometryStore((s) => s.pendingIds);
+  const closedBase3D = useGeometryStore((s) => s.closedBase3D);
   const selection = useGeometryStore((s) => s.selection).filter((x) => x.domain === domain);
   const clearSelection = useGeometryStore((s) => s.clearSelection);
   const view = useGeometryStore((s) => s.view);
@@ -165,10 +176,28 @@ export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) 
       );
     }
 
-    const hint = domain === '2d' ? TOOL_2D_HINTS[tool] : TOOL_3D_HINTS[tool];
+    const isClosedPolygonWaitingApex =
+      domain === '3d' &&
+      (tool === 'pyramid' || tool === 'prism' || tool === 'extrudePyramid' || tool === 'extrudePrism') &&
+      closedBase3D.length >= 3;
+
+    const hint = isClosedPolygonWaitingApex
+      ? tool === 'prism' || tool === 'extrudePrism'
+        ? `Đã khép đáy ${closedBase3D.length} đỉnh · Chạm điểm (hoặc nhấn giữ kéo cao độ) để dựng Lăng trụ`
+        : `Đã khép đáy ${closedBase3D.length} đỉnh · Chạm điểm (hoặc nhấn giữ kéo cao độ) để đặt đỉnh chóp S`
+      : domain === '2d'
+      ? TOOL_2D_HINTS[tool]
+      : TOOL_3D_HINTS[tool];
+
+    const canCloseBase =
+      domain === '3d' &&
+      (tool === 'pyramid' || tool === 'prism' || tool === 'extrudePyramid' || tool === 'extrudePrism') &&
+      closedBase3D.length === 0 &&
+      pendingIds.length >= 3;
+
     return (
       <div
-        className={`pointer-events-auto absolute bottom-3 left-1/2 z-20 flex max-w-[92%] -translate-x-1/2 items-center gap-3 rounded-lg border px-3.5 py-2 text-xs shadow-sm ${
+        className={`pointer-events-auto absolute bottom-3 left-1/2 z-20 flex max-w-[92%] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-lg border px-3.5 py-2 text-xs shadow-sm ${
           isDark
             ? 'border-[#1D5CE5]/50 bg-slate-900/95 text-slate-100'
             : 'border-[#1D5CE5]/35 bg-white/96 text-[#0F1B2D]'
@@ -179,6 +208,15 @@ export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) 
           {hint}
           {pendingIds.length > 0 && <strong className="ml-1.5 text-[#E06D1F]">(Đã chọn {pendingIds.length})</strong>}
         </span>
+        {canCloseBase && (
+          <button
+            type="button"
+            onClick={closeBase3DPolygon}
+            className="rounded-md bg-[#0E9F6E] px-2.5 py-0.5 text-[11px] font-semibold text-white hover:bg-[#0B835B]"
+          >
+            Chốt đáy & đặt đỉnh
+          </button>
+        )}
         <button
           type="button"
           onClick={() => (domain === '2d' ? setTool2D('select') : setTool3D('select'))}
