@@ -1215,12 +1215,8 @@ const ConstructionPreview3D: React.FC<{
 
   useEffect(() => () => snapBaseFillGeo?.dispose(), [snapBaseFillGeo]);
 
-  if (activeTool3D === 'select') return null;
-
-  const targetPos: Vec3 | null = hoveredPointId ? ptMap.get(hoveredPointId) ?? hoverGroundPos : hoverGroundPos;
-
   const groundRingPts = useMemo(() => {
-    if (!hoverGroundPos || hoveredPointId) return null;
+    if (activeTool3D === 'select' || !hoverGroundPos || hoveredPointId) return null;
     const pts: Array<[number, number, number]> = [];
     const r = 0.22;
     for (let i = 0; i <= 20; i++) {
@@ -1228,7 +1224,11 @@ const ConstructionPreview3D: React.FC<{
       pts.push(mathToScene([hoverGroundPos[0] + r * Math.cos(t), hoverGroundPos[1] + r * Math.sin(t), 0.015]));
     }
     return pts;
-  }, [hoverGroundPos, hoveredPointId]);
+  }, [activeTool3D, hoverGroundPos, hoveredPointId]);
+
+  if (activeTool3D === 'select') return null;
+
+  const targetPos: Vec3 | null = hoveredPointId ? ptMap.get(hoveredPointId) ?? hoverGroundPos : hoverGroundPos;
 
   const renderToolPreview = () => {
     // 0. GeoGebra 2-Click Tetrahedron & Cube Previews
