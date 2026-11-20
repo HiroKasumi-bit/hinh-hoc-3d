@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { GizmoHelper, GizmoViewport, Html, Line, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -15,11 +15,13 @@ import {
   angleLinePlaneDeg,
   anglePlanePlaneDeg,
   centroid3,
+  clampAndSnapXY,
   computePolyhedronEdgeVisibility,
   cross3,
   dist3,
   distPointToPlane,
   footPointOnPlane,
+  intersectRayHorizontalPlaneZ,
   intersectSpherePlane,
   len3,
   mathToScene,
@@ -75,6 +77,11 @@ interface ZDragSession {
   baseZ: number;
   floorZ: number;
   hudLabel: 'z' | 'h';
+  axis: 'xy' | 'z';
+  grabOffsetX: number;
+  grabOffsetY: number;
+  wasAlreadySelected: boolean;
+  isComputed: boolean;
   startClientX: number;
   startClientY: number;
   pointerId: number;
@@ -92,6 +99,7 @@ interface ZDragHud {
   displayVal: number;
   label: 'z' | 'h';
   mode: 'create' | 'adjust';
+  axis: 'xy' | 'z';
 }
 
 // ==================== CAMERA CONTROLLER & PNG EXPORT BRIDGE ====================
@@ -330,7 +338,7 @@ const AxesOxyz: React.FC<{ isDark: boolean; showAxes: boolean; showGrid: boolean
 // ==================== LIVE Z-ELEVATION GUIDE VISUALS ====================
 
 const ZElevationGuide: React.FC<{ hud: ZDragHud; isDark: boolean }> = ({ hud, isDark }) => {
-  const { x, y, z } = hud;
+  const { x, y, z, axis } = hud;
   const ringPts = useMemo(() => {
     const pts: Array<[number, number, number]> = [];
     const r = 0.28;
@@ -343,46 +351,126 @@ const ZElevationGuide: React.FC<{ hud: ZDragHud; isDark: boolean }> = ({ hud, is
 
   const railMin = Math.min(-1.5, z - 2.5);
   const railMax = Math.max(5.5, z + 2.5);
+  const isXY = axis === 'xy';
 
   return (
     <group>
-      {/* Subtle full vertical rail */}
-      <Line
-        points={[mathToScene([x, y, railMin]), mathToScene([x, y, railMax])]}
-        color="#1D5CE5"
-        lineWidth={1.3}
-        transparent
-        opacity={0.35}
-      />
+      {isXY ? (
+        <>
+          {/* Horizontal XY plane crosshairs at z = hud.z */}
+          <Line
+            points={[mathToScene([x - 1.6, y, z]), mathToScene([x + 1.6, y, z])]}
+            color="#DC2626"
+            lineWidth={1.7}
+            dashed
+            dashSize={0.14}
+            gapSize={0.09}
+            transparent
+            opacity={0.78}
+          />
+          <Line
+            points={[mathToScene([x, y - 1.6, z]), mathToScene([x, y + 1.6, z])]}
+            color="#16A34A"
+            lineWidth={1.7}
+            dashed
+            dashSize={0.14}
+            gapSize={0.09}
+            transparent
+            opacity={0.78}
+          />
+        </>
+      ) : (
+        /* Subtle full vertical rail when dragging Z */
+        <Line
+          points={[mathToScene([x, y, railMin]), mathToScene([x, y, railMax])]}
+          color="#1D5CE5"
+          lineWidth={1.3}
+          transparent
+          opacity={0.35}
+        />
+      )}
+
       {/* Crisp dashed drop-line from ground (x,y,0) to (x,y,z) */}
       {Math.abs(z) > 0.01 && (
         <Line
           points={[mathToScene([x, y, 0]), mathToScene([x, y, z])]}
-          color="#E06D1F"
-          lineWidth={2.6}
+          color={isXY ? '#0284C7' : '#E06D1F'}
+          lineWidth={isXY ? 1.8 : 2.6}
           dashed
           dashSize={0.16}
           gapSize={0.1}
         />
       )}
       {/* Ground projection footprint ring at (x, y, 0) */}
-      <Line points={ringPts} color="#E06D1F" lineWidth={2} />
+      <Line points={ringPts} color={isXY ? '#0284C7' : '#E06D1F'} lineWidth={2} />
       <mesh position={mathToScene([x, y, 0.01])}>
         <sphereGeometry args={[0.055, 12, 12]} />
-        <meshBasicMaterial color="#E06D1F" />
+        <meshBasicMaterial color={isXY ? '#0284C7' : '#E06D1F'} />
       </mesh>
-      {/* Floating live elevation readout */}
+      {/* Floating live readout */}
       <Label3D position={mathToScene([x, y + 0.55, z + 0.35])}>
         <div
           className={`font-math pointer-events-none select-none whitespace-nowrap rounded-md border px-2 py-0.5 text-xs font-bold shadow-md ${
-            isDark
+            isXY
+              ? isDark
+                ? 'border-sky-400 bg-slate-900/95 text-sky-300'
+                : 'border-sky-500 bg-sky-50/98 text-sky-900'
+              : isDark
               ? 'border-amber-400 bg-slate-900/95 text-amber-300'
               : 'border-amber-500 bg-amber-50/98 text-amber-900'
           }`}
         >
-          ↕ {hud.label} = {formatNum(hud.displayVal, 2)}
+          {isXY
+            ? `↔ (${formatNum(x, 2)}; ${formatNum(y, 2)}; ${formatNum(z, 2)})`
+            : `↕ ${hud.label} = ${formatNum(hud.displayVal, 2)}`}
         </div>
       </Label3D>
+    </group>
+  );
+};
+
+const PointMoveGizmo3D: React.FC<{ pos: Vec3; mode: 'xy' | 'z' }> = ({ pos, mode }) => {
+  const scenePos = mathToScene(pos);
+  if (mode === 'xy') {
+    const len = 0.46;
+    return (
+      <group position={scenePos}>
+        {/* ±X_math (±Z_scene) and ±Y_math (±X_scene) */}
+        <Line points={[[0, 0, -len], [0, 0, len]]} color="#0284C7" lineWidth={2} transparent opacity={0.85} />
+        <Line points={[[-len, 0, 0], [len, 0, 0]]} color="#0284C7" lineWidth={2} transparent opacity={0.85} />
+        <mesh position={[0, 0, len]} rotation={[Math.PI / 2, 0, 0]}>
+          <coneGeometry args={[0.055, 0.14, 10]} />
+          <meshBasicMaterial color="#0284C7" />
+        </mesh>
+        <mesh position={[0, 0, -len]} rotation={[-Math.PI / 2, 0, 0]}>
+          <coneGeometry args={[0.055, 0.14, 10]} />
+          <meshBasicMaterial color="#0284C7" />
+        </mesh>
+        <mesh position={[len, 0, 0]} rotation={[0, 0, -Math.PI / 2]}>
+          <coneGeometry args={[0.055, 0.14, 10]} />
+          <meshBasicMaterial color="#0284C7" />
+        </mesh>
+        <mesh position={[-len, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <coneGeometry args={[0.055, 0.14, 10]} />
+          <meshBasicMaterial color="#0284C7" />
+        </mesh>
+      </group>
+    );
+  }
+
+  const len = 0.54;
+  return (
+    <group position={scenePos}>
+      {/* ±Z_math (±Y_scene) */}
+      <Line points={[[0, -len, 0], [0, len, 0]]} color="#E06D1F" lineWidth={2.2} transparent opacity={0.9} />
+      <mesh position={[0, len, 0]}>
+        <coneGeometry args={[0.058, 0.15, 10]} />
+        <meshBasicMaterial color="#E06D1F" />
+      </mesh>
+      <mesh position={[0, -len, 0]} rotation={[Math.PI, 0, 0]}>
+        <coneGeometry args={[0.058, 0.15, 10]} />
+        <meshBasicMaterial color="#E06D1F" />
+      </mesh>
     </group>
   );
 };
@@ -1675,6 +1763,8 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
   const closedBase3D = useGeometryStore((s) => s.closedBase3D);
   const activeTool3D = useGeometryStore((s) => s.activeTool3D);
   const segment3DMode = useGeometryStore((s) => s.segment3DMode);
+  const pointDragMode3D = useGeometryStore((s) => s.pointDragMode3D);
+  const togglePointDragMode3D = useGeometryStore((s) => s.togglePointDragMode3D);
   const handlePoint3DClick = useGeometryStore((s) => s.handlePoint3DClick);
   const handleGround3DConstructionClick = useGeometryStore((s) => s.handleGround3DConstructionClick);
   const createNetForPolyhedron = useGeometryStore((s) => s.createNetForPolyhedron);
@@ -1725,7 +1815,25 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
     [scene3d.points, scene3d.planes, sliderScope]
   );
 
-  // Window-level pointermove / pointerup for silky 1:1 vertical Z/height elevation on desktop & mobile!
+  const raycastHorizontalPlaneXY = useCallback(
+    (clientX: number, clientY: number, planeZ: number): [number, number] | null => {
+      const rect = gl.domElement.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return null;
+      const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+      const ndcY = -((clientY - rect.top) / rect.height) * 2 + 1;
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+      const { origin, direction } = raycaster.ray;
+      return intersectRayHorizontalPlaneZ(
+        [origin.x, origin.y, origin.z],
+        [direction.x, direction.y, direction.z],
+        planeZ
+      );
+    },
+    [camera, gl]
+  );
+
+  // Window-level pointermove / pointerup for silky 1:1 XY-plane dragging & Z/height elevation on desktop & mobile!
   useEffect(() => {
     const computeUnitsPerPx = (baseX: number, baseY: number, baseZ: number) => {
       const pScene = new THREE.Vector3(...mathToScene([baseX, baseY, baseZ]));
@@ -1737,13 +1845,13 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
 
     const onPointerMove = (e: PointerEvent) => {
       const session = dragRef.current;
-      if (!session || e.pointerId !== session.pointerId) return;
+      if (!session || e.pointerId !== session.pointerId || session.isComputed) return;
 
       const dx = e.clientX - session.startClientX;
       const dy = session.startClientY - e.clientY; // positive when dragging UP
 
-      // Activate Z-drag right away if dragging vertically!
-      if (!session.activated && Math.abs(dy) >= 10 && Math.abs(dy) >= Math.abs(dx) * 1.1) {
+      // Activate drag immediately once moved >= 5px (using session.axis: 'xy' default, or 'z' if Shift/Z-mode!)
+      if (!session.activated && Math.hypot(dx, dy) >= 5) {
         if (session.timerId !== null) {
           window.clearTimeout(session.timerId);
           session.timerId = null;
@@ -1754,7 +1862,7 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
         if (session.mode === 'adjust') pushHistory();
         if (controlsRef.current) controlsRef.current.enabled = false;
         if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-          try { navigator.vibrate(16); } catch { /* ignore */ }
+          try { navigator.vibrate(14); } catch { /* ignore */ }
         }
         setZHud({
           pointId: session.pointId,
@@ -1764,10 +1872,52 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
           displayVal: session.hudLabel === 'h' ? Math.abs(session.baseZ - session.floorZ) : session.baseZ,
           label: session.hudLabel,
           mode: session.mode,
+          axis: session.axis,
         });
       }
 
       if (!session.activated) return;
+
+      if (session.axis === 'xy') {
+        session.moved = true;
+        const snap = useGeometryStore.getState().view.snapToGrid;
+        const hit = raycastHorizontalPlaneXY(e.clientX, e.clientY, session.baseZ);
+        let rawX: number;
+        let rawY: number;
+        if (hit) {
+          rawX = hit[0] + session.grabOffsetX;
+          rawY = hit[1] + session.grabOffsetY;
+        } else {
+          // Camera nearly level with plane: fallback to camera right & horizontal forward projection on XY
+          const unitsPerPx = computeUnitsPerPx(session.baseX, session.baseY, session.baseZ);
+          const camRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+          camRight.y = 0;
+          if (camRight.lengthSq() < 1e-5) camRight.set(1, 0, 0);
+          camRight.normalize();
+          const camBack = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 2);
+          camBack.y = 0;
+          if (camBack.lengthSq() < 1e-5) camBack.set(0, 0, 1);
+          camBack.normalize();
+          const deltaSceneX = (camRight.x * dx + -camBack.x * dy) * unitsPerPx;
+          const deltaSceneZ = (camRight.z * dx + -camBack.z * dy) * unitsPerPx;
+          const [dMathX, dMathY] = sceneToMath([deltaSceneX, 0, deltaSceneZ]);
+          rawX = session.baseX + dMathX;
+          rawY = session.baseY + dMathY;
+        }
+        const [nx, ny] = clampAndSnapXY(rawX, rawY, snap);
+        updatePoint3DCoords(session.pointId, [nx, ny, session.baseZ]);
+        setZHud({
+          pointId: session.pointId,
+          x: nx,
+          y: ny,
+          z: session.baseZ,
+          displayVal: session.baseZ,
+          label: 'z',
+          mode: session.mode,
+          axis: 'xy',
+        });
+        return;
+      }
 
       if (Math.abs(dy) >= 4 || session.moved) {
         session.moved = true;
@@ -1795,6 +1945,7 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
             displayVal: Number(Math.abs(clampedZ - session.floorZ).toFixed(2)),
             label: 'h',
             mode: session.mode,
+            axis: 'z',
           });
         } else {
           updatePoint3DCoords(session.pointId, [session.baseX, session.baseY, nextAnchorZ]);
@@ -1806,6 +1957,7 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
             displayVal: nextAnchorZ,
             label: 'z',
             mode: session.mode,
+            axis: 'z',
           });
         }
       }
@@ -1818,10 +1970,14 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
         window.clearTimeout(session.timerId);
       }
 
-      // If this was a quick tap/click on an existing point (in 'select' mode) without Z-dragging, select it reliably now!
+      // Tap without drag on existing point: toggle XY <-> Z if already selected, otherwise select it!
       if (session.mode === 'adjust' && !session.activated && !session.moved) {
         suppressClickIdRef.current = session.pointId;
-        handlePoint3DClick(session.pointId, e.shiftKey || e.ctrlKey || e.metaKey);
+        if (session.wasAlreadySelected && !session.isComputed && !(e.shiftKey || e.ctrlKey || e.metaKey)) {
+          togglePointDragMode3D();
+        } else {
+          handlePoint3DClick(session.pointId, e.shiftKey || e.ctrlKey || e.metaKey);
+        }
         setTimeout(() => {
           if (suppressClickIdRef.current === session.pointId) {
             suppressClickIdRef.current = null;
@@ -1851,7 +2007,18 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
       window.removeEventListener('pointerup', finishDrag);
       window.removeEventListener('pointercancel', finishDrag);
     };
-  }, [camera, size.height, controlsRef, updatePoint3DCoords, updatePoints3DZBulk, pushHistory, handlePoint3DClick]);
+  }, [
+    camera,
+    gl,
+    size.height,
+    controlsRef,
+    updatePoint3DCoords,
+    updatePoints3DZBulk,
+    pushHistory,
+    handlePoint3DClick,
+    togglePointDragMode3D,
+    raycastHorizontalPlaneXY,
+  ]);
 
   // Attach optional hold-and-drag Z / height elevation right after creating a point, apex S, or box top face!
   const attachCreateZDrag = (
@@ -1879,6 +2046,11 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
       baseZ: target.anchor[2],
       floorZ: target.baseZ,
       hudLabel: target.label,
+      axis: 'z',
+      grabOffsetX: 0,
+      grabOffsetY: 0,
+      wasAlreadySelected: false,
+      isComputed: false,
       startClientX: nativeEvent.clientX,
       startClientY: nativeEvent.clientY,
       pointerId: nativeEvent.pointerId,
@@ -1896,6 +2068,7 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
       displayVal: target.label === 'h' ? Math.abs(target.anchor[2] - target.baseZ) : target.anchor[2],
       label: target.label,
       mode: 'create',
+      axis: 'z',
     };
 
     if (immediateActivate) {
@@ -2017,8 +2190,21 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
       return;
     }
 
-    // Select or Point tool: support both instant tap selection (on pointerup) and press-and-hold Z elevation!
+    // Select or Point tool: immediate XY plane drag (default), Shift/Z-mode or 220ms hold-to-lift Z!
     if (controlsRef.current) controlsRef.current.enabled = false;
+
+    const wasAlreadySelected =
+      activeTool3D === 'select' &&
+      selection.length === 1 &&
+      selection[0].domain === '3d' &&
+      selection[0].type === 'point' &&
+      selection[0].id === pointId;
+
+    const initialAxis: 'xy' | 'z' =
+      e.nativeEvent.shiftKey || (wasAlreadySelected && pointDragMode3D === 'z') ? 'z' : 'xy';
+    const startHit = raycastHorizontalPlaneXY(e.nativeEvent.clientX, e.nativeEvent.clientY, pos[2]);
+    const grabOffsetX = startHit ? pos[0] - startHit[0] : 0;
+    const grabOffsetY = startHit ? pos[1] - startHit[1] : 0;
 
     const session: ZDragSession = {
       pointId,
@@ -2028,6 +2214,11 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
       baseZ: pos[2],
       floorZ: 0,
       hudLabel: 'z',
+      axis: initialAxis,
+      grabOffsetX,
+      grabOffsetY,
+      wasAlreadySelected,
+      isComputed,
       startClientX: e.nativeEvent.clientX,
       startClientY: e.nativeEvent.clientY,
       pointerId: e.nativeEvent.pointerId,
@@ -2037,9 +2228,10 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
       timerId: null,
     };
 
-    if (!isComputed) {
+    if (!isComputed && initialAxis === 'xy') {
       session.timerId = window.setTimeout(() => {
         if (dragRef.current !== session) return;
+        session.axis = 'z';
         session.activated = true;
         session.moved = true;
         suppressClickIdRef.current = pointId;
@@ -2055,6 +2247,7 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
           displayVal: pos[2],
           label: 'z',
           mode: 'adjust',
+          axis: 'z',
         });
       }, 220);
     }
@@ -2143,8 +2336,21 @@ const Scene3DContent: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl 
         }}
       />
 
-      {/* Active live Z-elevation visual guide rail & ground drop-line */}
+      {/* Active live XY / Z guide crosshairs, rail & ground drop-line */}
       {zHud && <ZElevationGuide hud={zHud} isDark={isDark} />}
+
+      {/* GeoGebra-style XY / Z directional gizmo on selected free 3D point */}
+      {activeTool3D === 'select' &&
+        !zHud &&
+        selection.length === 1 &&
+        selection[0].domain === '3d' &&
+        selection[0].type === 'point' &&
+        (() => {
+          const selPt = scene3d.points.find((p) => p.id === selection[0].id);
+          if (!selPt || !selPt.visible || selPt.computed) return null;
+          const pos = ptMap.get(selPt.id) ?? [selPt.x, selPt.y, selPt.z];
+          return <PointMoveGizmo3D pos={pos} mode={pointDragMode3D} />;
+        })()}
 
       {/* Polyhedra (hidden when an interactive unfolded Net3D is visible for the same polyhedron) */}
       {scene3d.polyhedra.map((poly) => {

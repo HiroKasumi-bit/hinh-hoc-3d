@@ -59,6 +59,8 @@ export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) 
   const closeBase3DPolygon = useGeometryStore((s) => s.closeBase3DPolygon);
   const pendingIds = useGeometryStore((s) => s.pendingIds);
   const closedBase3D = useGeometryStore((s) => s.closedBase3D);
+  const pointDragMode3D = useGeometryStore((s) => s.pointDragMode3D);
+  const togglePointDragMode3D = useGeometryStore((s) => s.togglePointDragMode3D);
   const selection = useGeometryStore((s) => s.selection).filter((x) => x.domain === domain);
   const clearSelection = useGeometryStore((s) => s.clearSelection);
   const view = useGeometryStore((s) => s.view);
@@ -345,7 +347,7 @@ export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) 
         };
         return (
           <div
-            className={`pointer-events-auto absolute bottom-3 left-1/2 z-20 flex max-w-[96%] -translate-x-1/2 flex-nowrap items-center gap-2 whitespace-nowrap rounded-xl border px-3 py-1.5 text-xs shadow-sm ${
+            className={`pointer-events-auto absolute bottom-3 left-1/2 z-20 flex max-w-[96%] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border px-3 py-1.5 text-xs shadow-sm sm:flex-nowrap sm:gap-2 ${
               isDark ? 'border-slate-700 bg-slate-900/95 text-slate-200' : 'border-[#DCE3EC] bg-white/96 text-[#0F1B2D]'
             }`}
           >
@@ -360,31 +362,45 @@ export const ContextActionBar: React.FC<{ domain: '2d' | '3d' }> = ({ domain }) 
               {renameKey && <kbd className="font-math hidden rounded bg-white/20 px-1 text-[9.5px] sm:inline">{renameKey}</kbd>}
             </button>
             {!selectedPt.computed && (
-              <div className="flex items-center gap-1">
+              <>
                 <button
                   type="button"
-                  title="Hạ z xuống 0.5"
-                  onClick={() => stepZ(-0.5)}
-                  className={`flex items-center gap-0.5 rounded border px-2 py-1 font-math text-[11px] font-semibold ${
-                    isDark ? 'border-slate-700 bg-slate-800 hover:bg-slate-700' : 'border-slate-200 bg-[#F2F5F9] hover:bg-slate-200'
+                  title="Chạm điểm hoặc bấm nút này để đổi hướng kéo ngang XY / đứng Z"
+                  onClick={togglePointDragMode3D}
+                  className={`flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-white transition-colors ${
+                    pointDragMode3D === 'xy'
+                      ? 'bg-[#0284C7] hover:bg-[#0369A1]'
+                      : 'bg-[#E06D1F] hover:bg-[#C25A14]'
                   }`}
                 >
-                  <ArrowDown className="h-3 w-3" />
-                  0.5
+                  <span>{pointDragMode3D === 'xy' ? '↔ Kéo XY' : '↕ Kéo Z'}</span>
                 </button>
-                <span className="font-math px-1 text-xs font-bold">z={formatNum(selectedPt.z, 2)}</span>
-                <button
-                  type="button"
-                  title="Nâng z lên 0.5"
-                  onClick={() => stepZ(0.5)}
-                  className={`flex items-center gap-0.5 rounded border px-2 py-1 font-math text-[11px] font-semibold ${
-                    isDark ? 'border-slate-700 bg-slate-800 hover:bg-slate-700' : 'border-slate-200 bg-[#F2F5F9] hover:bg-slate-200'
-                  }`}
-                >
-                  <ArrowUp className="h-3 w-3" />
-                  0.5
-                </button>
-              </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    title="Hạ z xuống 0.5"
+                    onClick={() => stepZ(-0.5)}
+                    className={`flex items-center gap-0.5 rounded border px-2 py-1 font-math text-[11px] font-semibold ${
+                      isDark ? 'border-slate-700 bg-slate-800 hover:bg-slate-700' : 'border-slate-200 bg-[#F2F5F9] hover:bg-slate-200'
+                    }`}
+                  >
+                    <ArrowDown className="h-3 w-3" />
+                    0.5
+                  </button>
+                  <span className="font-math px-1 text-xs font-bold">z={formatNum(selectedPt.z, 2)}</span>
+                  <button
+                    type="button"
+                    title="Nâng z lên 0.5"
+                    onClick={() => stepZ(0.5)}
+                    className={`flex items-center gap-0.5 rounded border px-2 py-1 font-math text-[11px] font-semibold ${
+                      isDark ? 'border-slate-700 bg-slate-800 hover:bg-slate-700' : 'border-slate-200 bg-[#F2F5F9] hover:bg-slate-200'
+                    }`}
+                  >
+                    <ArrowUp className="h-3 w-3" />
+                    0.5
+                  </button>
+                </div>
+              </>
             )}
             <button type="button" onClick={clearSelection} className="shrink-0 rounded p-1 hover:bg-slate-200/50">
               <X className="h-3.5 w-3.5" />

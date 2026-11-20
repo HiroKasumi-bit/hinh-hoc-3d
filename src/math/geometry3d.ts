@@ -679,3 +679,36 @@ export function pickMagneticPoint3D(params: {
 
   return null;
 }
+
+/**
+ * Intersect a Three.js world-space ray with the horizontal plane at math height `planeMathZ`
+ * (which corresponds to `y_scene = planeMathZ` in our mathToScene([x,y,z]) = [y,z,x] mapping).
+ */
+export function intersectRayHorizontalPlaneZ(
+  rayOriginScene: Vec3,
+  rayDirScene: Vec3,
+  planeMathZ: number
+): [number, number] | null {
+  const denom = rayDirScene[1];
+  if (Math.abs(denom) < 0.04) return null;
+  const t = (planeMathZ - rayOriginScene[1]) / denom;
+  if (!Number.isFinite(t) || t <= 0 || t > 120) return null;
+  const hitScene: Vec3 = [
+    rayOriginScene[0] + rayDirScene[0] * t,
+    planeMathZ,
+    rayOriginScene[2] + rayDirScene[2] * t,
+  ];
+  const m = sceneToMath(hitScene);
+  if (!Number.isFinite(m[0]) || !Number.isFinite(m[1])) return null;
+  return [m[0], m[1]];
+}
+
+export function clampAndSnapXY(x: number, y: number, snapToGrid: boolean): [number, number] {
+  const clamp = (v: number) => Math.max(-14, Math.min(14, v));
+  const cx = clamp(x);
+  const cy = clamp(y);
+  if (snapToGrid) {
+    return [Math.round(cx * 2) / 2, Math.round(cy * 2) / 2];
+  }
+  return [Number(cx.toFixed(2)), Number(cy.toFixed(2))];
+}

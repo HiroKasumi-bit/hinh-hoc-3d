@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { parseSmartInput } from '../parser';
 import { evalDerivative2D, findFunctionIntersections2D } from '../geometry2d';
-import { pickMagneticPoint3D } from '../geometry3d';
+import {
+  clampAndSnapXY,
+  intersectRayHorizontalPlaneZ,
+  pickMagneticPoint3D,
+} from '../geometry3d';
 import { useGeometryStore } from '../../store/useGeometryStore';
 import { solveVietnameseMathProblem } from '../../../functions/_lib/problemEngine';
 import {
@@ -260,5 +264,36 @@ describe('GeoGebra 3D Solids, Oxyz Semicolons, Function Calculus & Problem Secur
         isTouch: false,
       })
     ).toBeNull();
+  });
+
+  it('intersects horizontal XY plane at arbitrary height z and toggles XY <-> Z drag mode cleanly', () => {
+    // Ray from Three.js scene (y_scene=6, x_scene=1, z_scene=2) pointing downward (-y_scene) intersects math z=2 cleanly!
+    const dirLen = Math.hypot(1, -2, 0.5);
+    const hit = intersectRayHorizontalPlaneZ(
+      [1, 6, 2],
+      [1 / dirLen, -2 / dirLen, 0.5 / dirLen],
+      2
+    );
+    expect(hit).not.toBeNull();
+    // t = (2 - 6) / (-2/dirLen) = 2*dirLen -> hitScene = [1 + 2, 2, 2 + 1] = [3, 2, 3] -> math [x=3, y=3]
+    expect(hit![0]).toBeCloseTo(3, 5);
+    expect(hit![1]).toBeCloseTo(3, 5);
+
+    // Nearly parallel ray returns null
+    expect(intersectRayHorizontalPlaneZ([0, 2, 0], [1, 0.01, 0], 2)).toBeNull();
+
+    // Clamp & snap helper
+    expect(clampAndSnapXY(19.2, -16.4, false)).toEqual([14, -14]);
+    expect(clampAndSnapXY(2.74, -1.22, true)).toEqual([2.5, -1]);
+
+    // Store pointDragMode3D defaults to 'xy', toggles to 'z', resets to 'xy' on new selection
+    const p1 = useGeometryStore.getState().addPoint3D(1, 1, 2, 'A');
+    const p2 = useGeometryStore.getState().addPoint3D(3, 2, 0, 'B');
+    useGeometryStore.getState().selectItem({ domain: '3d', type: 'point', id: p1 });
+    expect(useGeometryStore.getState().pointDragMode3D).toBe('xy');
+    useGeometryStore.getState().togglePointDragMode3D();
+    expect(useGeometryStore.getState().pointDragMode3D).toBe('z');
+    useGeometryStore.getState().selectItem({ domain: '3d', type: 'point', id: p2 });
+    expect(useGeometryStore.getState().pointDragMode3D).toBe('xy');
   });
 });

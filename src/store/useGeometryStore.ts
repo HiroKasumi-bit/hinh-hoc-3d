@@ -105,6 +105,7 @@ interface GeometryStore {
   activePresetId: string | null;
   sidebarOpen: boolean;
   multiSelectMode: boolean;
+  pointDragMode3D: 'xy' | 'z';
   shortcuts: ShortcutMap;
   renamingPoint: { domain: '2d' | '3d'; id: string } | null;
 
@@ -126,6 +127,8 @@ interface GeometryStore {
   }) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleMultiSelectMode: () => void;
+  setPointDragMode3D: (mode: 'xy' | 'z') => void;
+  togglePointDragMode3D: () => void;
   updateView: (partial: Partial<ViewSettings>) => void;
   requestCamera: (preset: CameraPreset3D) => void;
   showToast: (text: string, tone?: 'info' | 'success' | 'error') => void;
@@ -262,6 +265,7 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
       ? window.innerWidth >= 960 && window.innerHeight >= 540
       : true,
   multiSelectMode: false,
+  pointDragMode3D: 'xy',
   shortcuts: loadSavedShortcuts(),
   renamingPoint: null,
   past: [],
@@ -319,6 +323,9 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
   },
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   toggleMultiSelectMode: () => set((s) => ({ multiSelectMode: !s.multiSelectMode })),
+  setPointDragMode3D: (pointDragMode3D) => set({ pointDragMode3D }),
+  togglePointDragMode3D: () =>
+    set((s) => ({ pointDragMode3D: s.pointDragMode3D === 'xy' ? 'z' : 'xy' })),
   updateView: (partial) => set((s) => ({ view: { ...s.view, ...partial } })),
   requestCamera: (preset) => set({ cameraRequest: { preset, nonce: Date.now() } }),
   showToast: (text, tone = 'info') => set({ toast: { text, tone } }),
@@ -487,9 +494,20 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
             : [...s.selection, item],
         };
       }
-      return { selection: [item] };
+      const alreadySingle = s.selection.length === 1 && exists;
+      return {
+        selection: [item],
+        pointDragMode3D: alreadySingle ? s.pointDragMode3D : 'xy',
+      };
     }),
-  clearSelection: () => set({ selection: [], pendingIds: [], closedBase3D: [], pendingSegment3DId: null }),
+  clearSelection: () =>
+    set({
+      selection: [],
+      pendingIds: [],
+      closedBase3D: [],
+      pendingSegment3DId: null,
+      pointDragMode3D: 'xy',
+    }),
 
   pushHistory: () => {
     const { sliders, scene2d, scene3d, past } = get();
