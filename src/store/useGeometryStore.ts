@@ -185,7 +185,10 @@ export const useGeometryStore = create<GeometryStore>((set, get) => ({
   cameraRequest: null,
   toast: null,
   activePresetId: null,
-  sidebarOpen: typeof window !== 'undefined' ? window.innerWidth >= 900 : true,
+  sidebarOpen:
+    typeof window !== 'undefined'
+      ? window.innerWidth >= 960 && window.innerHeight >= 540
+      : true,
   multiSelectMode: false,
   past: [],
   future: [],

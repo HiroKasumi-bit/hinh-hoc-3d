@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useGeometryStore } from '../store/useGeometryStore';
 import { THPT_PRESETS } from '../presets/thptPresets';
+import { useViewportProfile } from '../hooks/useViewportProfile';
 import type { ViewMode } from '../types/geometry';
 
 export const TopBar: React.FC = () => {
@@ -44,6 +45,7 @@ export const TopBar: React.FC = () => {
   const [presetModalOpen, setPresetModalOpen] = useState(false);
   const [gradeTab, setGradeTab] = useState<10 | 11 | 12>(11);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const vp = useViewportProfile();
 
   useEffect(() => {
     const onOpenPresets = () => setPresetModalOpen(true);
@@ -106,28 +108,30 @@ export const TopBar: React.FC = () => {
   return (
     <>
       <header
-        className={`z-30 flex h-12 shrink-0 items-center justify-between gap-1.5 border-b px-2 sm:px-3 transition-colors ${
+        className={`safe-x z-30 flex shrink-0 items-center justify-between gap-1.5 border-b transition-colors ${
+          vp.isPhoneLandscape ? 'h-10' : 'h-12'
+        } ${
           isDark
             ? 'border-slate-800 bg-[#111827] text-slate-100'
             : 'border-[#E2E7EE] bg-white text-[#0F1B2D]'
         }`}
       >
         {/* Left: Sidebar toggle + Brand */}
-        <div className="flex items-center gap-1.5 sm:gap-2.5">
+        <div className="flex items-center gap-1.5 sm:gap-2">
           <button
             type="button"
             aria-label={sidebarOpen ? 'Thu gọn bảng bên trái' : 'Mở bảng nhập & đối tượng'}
             title={sidebarOpen ? 'Thu gọn bảng bên trái' : 'Mở bảng nhập & đối tượng'}
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className={`rounded-md p-2 transition-colors ${
+            className={`rounded-md p-1.5 sm:p-2 transition-colors ${
               isDark ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-slate-100 text-slate-600'
             }`}
           >
             <PanelLeft className="h-4 w-4" />
           </button>
 
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" className="shrink-0">
+          <div className="flex items-center gap-1.5">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" className="shrink-0">
               <polygon points="12,2.5 21,7.5 12,12.5 3,7.5" fill="#1D5CE5" fillOpacity="0.18" stroke="#1D5CE5" strokeWidth="1.7" strokeLinejoin="round" />
               <polygon points="3,7.5 12,12.5 12,21.5 3,16.5" fill="#0E9F6E" fillOpacity="0.16" stroke="#1D5CE5" strokeWidth="1.7" strokeLinejoin="round" />
               <polygon points="21,7.5 12,12.5 12,21.5 21,16.5" fill="#1D5CE5" fillOpacity="0.08" stroke="#1D5CE5" strokeWidth="1.7" strokeLinejoin="round" />
@@ -142,7 +146,7 @@ export const TopBar: React.FC = () => {
           </div>
         </div>
 
-        {/* Center: Mode Switcher */}
+        {/* Center: Mode Switcher (2D | 3D in portrait; 2D | 3D | 2D+3D in landscape & desktop!) */}
         <div
           className={`flex items-center rounded-lg border p-0.5 ${
             isDark ? 'border-slate-700 bg-slate-900' : 'border-[#DCE3EC] bg-[#F2F5F9]'
@@ -150,12 +154,13 @@ export const TopBar: React.FC = () => {
         >
           {modeOptions.map((opt) => {
             const active = mode === opt.id;
+            const hideInPortrait = opt.id === 'split' && vp.isPhonePortrait;
             return (
               <button
                 key={opt.id}
                 type="button"
                 onClick={() => setMode(opt.id)}
-                className={`${opt.id === 'split' ? 'hidden sm:flex' : 'flex'} items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition-all ${
+                className={`${hideInPortrait ? 'hidden' : 'flex'} items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold transition-all sm:px-2.5 ${
                   active
                     ? isDark
                       ? 'bg-[#1D5CE5] text-white shadow-2xs'
@@ -166,8 +171,15 @@ export const TopBar: React.FC = () => {
                 }`}
               >
                 {opt.icon}
-                <span className="sm:hidden">{opt.id === '2d' ? '2D' : '3D'}</span>
-                <span className="hidden md:inline">{opt.label}</span>
+                <span>
+                  {vp.isCompact
+                    ? opt.id === '2d'
+                      ? '2D'
+                      : opt.id === '3d'
+                      ? '3D'
+                      : '2D+3D'
+                    : opt.label}
+                </span>
               </button>
             );
           })}
@@ -178,14 +190,13 @@ export const TopBar: React.FC = () => {
           <button
             type="button"
             onClick={() => setPresetModalOpen(true)}
-            className="flex items-center gap-1.5 rounded-md bg-[#1D5CE5] px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#174CC2]"
+            className="flex items-center gap-1 rounded-md bg-[#1D5CE5] px-2 py-1 text-xs font-semibold text-white transition-colors hover:bg-[#174CC2] sm:px-2.5 sm:py-1.5"
           >
             <BookOpen className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Mẫu đề THPT</span>
-            <span className="sm:hidden">Mẫu</span>
+            <span>{vp.isCompact ? 'Mẫu' : 'Mẫu đề THPT'}</span>
           </button>
 
-          <div className={`mx-1 hidden h-5 w-px sm:block ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
+          <div className={`mx-0.5 hidden h-4 w-px sm:block ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
 
           <button
             type="button"
@@ -203,7 +214,7 @@ export const TopBar: React.FC = () => {
             title="Làm lại (Ctrl+Y)"
             disabled={future.length === 0}
             onClick={redo}
-            className={`hidden rounded-md p-1.5 transition-colors disabled:opacity-35 sm:inline-flex ${
+            className={`${vp.isPhonePortrait ? 'hidden' : 'inline-flex'} rounded-md p-1.5 transition-colors disabled:opacity-35 ${
               isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'
             }`}
           >
@@ -224,7 +235,7 @@ export const TopBar: React.FC = () => {
             type="button"
             title={view.showGrid ? 'Tắt lưới ô vuông' : 'Bật lưới ô vuông'}
             onClick={() => updateView({ showGrid: !view.showGrid })}
-            className={`hidden rounded-md p-1.5 transition-colors sm:inline-flex ${
+            className={`${vp.isPhonePortrait ? 'hidden' : 'inline-flex'} rounded-md p-1.5 transition-colors ${
               view.showGrid ? 'bg-[#1D5CE5]/12 text-[#1D5CE5]' : 'opacity-50'
             } ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
           >
@@ -234,20 +245,20 @@ export const TopBar: React.FC = () => {
             type="button"
             title="Bật/tắt tên điểm & số đo"
             onClick={() => updateView({ showLabels: !view.showLabels })}
-            className={`hidden rounded-md p-1.5 transition-colors md:inline-flex ${
+            className={`${vp.isCompact ? 'hidden' : 'inline-flex'} rounded-md p-1.5 transition-colors ${
               view.showLabels ? 'text-[#1D5CE5]' : 'opacity-50'
             } ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
           >
             <Tag className="h-4 w-4" />
           </button>
 
-          <div className={`mx-1 hidden h-5 w-px md:block ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
+          <div className={`mx-0.5 hidden h-4 w-px lg:block ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
 
           <button
             type="button"
             title="Chụp ảnh PNG chèn Word / Đề thi"
             onClick={handleExportPNG}
-            className={`hidden items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors md:flex ${
+            className={`${vp.isPhonePortrait ? 'hidden' : 'flex'} items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium transition-colors sm:px-2 ${
               isDark ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-slate-100 text-slate-700'
             }`}
           >
@@ -259,7 +270,7 @@ export const TopBar: React.FC = () => {
             type="button"
             title="Lưu tệp bài làm (.json)"
             onClick={handleSaveJSON}
-            className={`hidden rounded-md p-1.5 transition-colors md:inline-flex ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
+            className={`${vp.isCompact ? 'hidden' : 'inline-flex'} rounded-md p-1.5 transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
           >
             <Save className="h-4 w-4" />
           </button>
@@ -268,7 +279,7 @@ export const TopBar: React.FC = () => {
             type="button"
             title="Mở tệp đã lưu (.json)"
             onClick={() => fileInputRef.current?.click()}
-            className={`hidden rounded-md p-1.5 transition-colors md:inline-flex ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
+            className={`${vp.isCompact ? 'hidden' : 'inline-flex'} rounded-md p-1.5 transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
           >
             <FolderOpen className="h-4 w-4" />
           </button>
@@ -305,11 +316,11 @@ export const TopBar: React.FC = () => {
           >
             <div
               onClick={(e) => e.stopPropagation()}
-              className={`flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border shadow-xl ${
+              className={`flex max-h-[92dvh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border shadow-xl ${
                 isDark ? 'border-slate-700 bg-[#111827] text-slate-100' : 'border-[#DCE3EC] bg-white text-[#0F1B2D]'
               }`}
             >
-              <div className={`flex items-center justify-between border-b px-5 py-3.5 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              <div className={`flex shrink-0 items-center justify-between border-b px-4 py-2.5 sm:px-5 sm:py-3.5 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                 <div>
                   <h2 className="text-base font-bold">Thư viện Mẫu Đề Bài Toán THPT (GDPT 2018)</h2>
                   <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>

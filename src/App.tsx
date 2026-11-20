@@ -6,6 +6,7 @@ import { Viewport3D } from './components/Viewport3D';
 import { FloatingToolbar } from './components/FloatingToolbar';
 import { ContextActionBar } from './components/ContextActionBar';
 import { useGeometryStore } from './store/useGeometryStore';
+import { useViewportProfile } from './hooks/useViewportProfile';
 
 class CanvasErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -56,9 +57,24 @@ export default function App() {
   const redo = useGeometryStore((s) => s.redo);
   const setTool2D = useGeometryStore((s) => s.setTool2D);
   const setTool3D = useGeometryStore((s) => s.setTool3D);
+  const setMode = useGeometryStore((s) => s.setMode);
+  const setSidebarOpen = useGeometryStore((s) => s.setSidebarOpen);
   const clearSelection = useGeometryStore((s) => s.clearSelection);
+  const vp = useViewportProfile();
 
   const isDark = view.theme === 'dark';
+
+  // Auto-adapt smoothly on phone rotation (portrait <-> landscape)
+  useEffect(() => {
+    if (vp.isPhonePortrait && mode === 'split') {
+      setMode('3d');
+    }
+    if (vp.isCompact) {
+      setSidebarOpen(false);
+    }
+    // Only react to orientation/profile category changes, not manual sidebar toggles
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vp.isCompact, vp.isPhonePortrait, vp.isPhoneLandscape]);
 
   // Auto-dismiss toast after 3.2s
   useEffect(() => {
@@ -153,7 +169,7 @@ export default function App() {
 
   return (
     <div
-      className={`flex h-dvh w-screen flex-col overflow-hidden ${
+      className={`safe-bottom flex h-dvh w-screen flex-col overflow-hidden ${
         isDark ? 'dark bg-[#0D131F] text-slate-100' : 'bg-[#FAFBFD] text-[#0F1B2D]'
       }`}
     >
@@ -210,15 +226,19 @@ export default function App() {
                 <Viewport3D />
               </CanvasErrorBoundary>
               {is3DEmpty && activeTool3D === 'select' && (
-                <div className="pointer-events-none absolute right-3 bottom-3 left-3 flex justify-center">
+                <div className={`pointer-events-none absolute right-3 left-3 flex justify-center ${vp.isPhoneLandscape ? 'bottom-1.5' : 'bottom-3'}`}>
                   <div
-                    className={`rounded-full border px-3.5 py-1.5 text-center text-[11px] font-medium shadow-2xs ${
+                    className={`rounded-full border px-3 text-center font-medium shadow-2xs ${
+                      vp.isPhoneLandscape ? 'py-0.5 text-[10.5px]' : 'py-1.5 text-[11px]'
+                    } ${
                       isDark
                         ? 'border-slate-800 bg-slate-900/88 text-slate-300'
                         : 'border-[#DCE3EC] bg-white/90 text-slate-600'
                     }`}
                   >
-                    Chọn <strong>Điểm</strong> rồi nhấn giữ kéo lên/xuống để tạo điểm cao độ z · Hoặc nhấn giữ bất kỳ điểm nào để chỉnh z
+                    {vp.isPhoneLandscape
+                      ? <>Chọn <strong>Điểm</strong> + nhấn giữ kéo z · Nhấn giữ điểm có sẵn để chỉnh z</>
+                      : <>Chọn <strong>Điểm</strong> rồi nhấn giữ kéo lên/xuống để tạo điểm cao độ z · Hoặc nhấn giữ bất kỳ điểm nào để chỉnh z</>}
                   </div>
                 </div>
               )}

@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { useGeometryStore } from '../store/useGeometryStore';
+import { useViewportProfile } from '../hooks/useViewportProfile';
 import { computeIntegral2D, dist2D, formatLine2DEq, formatNum, polygonArea2D, resolveLine2D, resolvePoints2D } from '../math/geometry2d';
 import {
   dist3,
@@ -85,6 +86,7 @@ export const Sidebar: React.FC = () => {
   const [showKeyboard, setShowKeyboard] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const vp = useViewportProfile();
 
   const isDark = view.theme === 'dark';
 
@@ -140,28 +142,39 @@ export const Sidebar: React.FC = () => {
 
   return (
     <>
-      {/* Mobile slide-over backdrop */}
-      <div
-        className="fixed inset-0 z-30 bg-slate-950/40 backdrop-blur-[1px] md:hidden"
-        onClick={() => setSidebarOpen(false)}
-      />
+      {/* Overlay backdrop on compact screens (both portrait & landscape phones!) */}
+      {vp.isCompact && (
+        <div
+          className="fixed inset-0 z-30 bg-slate-950/40 backdrop-blur-[1px]"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex h-full w-[86vw] max-w-80 shrink-0 flex-col border-r shadow-2xl transition-colors md:static md:z-20 md:w-80 md:shadow-none ${
+        className={`${
+          vp.isCompact
+            ? 'fixed inset-y-0 left-0 z-40 w-[86vw] max-w-80 shadow-2xl'
+            : 'static z-20 w-80 shadow-none'
+        } flex h-full shrink-0 flex-col border-r transition-colors ${
+          vp.isPhoneLandscape ? 'overflow-y-auto' : ''
+        } ${
           isDark ? 'border-slate-800 bg-[#111827] text-slate-100' : 'border-[#E2E7EE] bg-white text-[#0F1B2D]'
         }`}
+        style={{ paddingLeft: vp.isCompact ? 'env(safe-area-inset-left)' : undefined }}
       >
-        {/* Mobile Drawer Header */}
-        <div className={`flex items-center justify-between border-b px-3 py-2.5 md:hidden ${isDark ? 'border-slate-800' : 'border-[#E2E7EE]'}`}>
-          <span className="text-xs font-bold">Nhập toán & Danh sách đối tượng</span>
-          <button
-            type="button"
-            aria-label="Đóng bảng bên"
-            onClick={() => setSidebarOpen(false)}
-            className={`rounded-md p-1.5 ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
+        {/* Compact Drawer Header (visible in both portrait & landscape phones) */}
+        {vp.isCompact && (
+          <div className={`flex shrink-0 items-center justify-between border-b px-3 py-2 ${isDark ? 'border-slate-800' : 'border-[#E2E7EE]'}`}>
+            <span className="text-xs font-bold">Nhập toán & Danh sách đối tượng</span>
+            <button
+              type="button"
+              aria-label="Đóng bảng bên"
+              onClick={() => setSidebarOpen(false)}
+              className={`rounded-md p-1.5 ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
       {/* ==================== SMART MATH INPUT ==================== */}
       <div className={`border-b p-3 ${isDark ? 'border-slate-800' : 'border-[#E2E7EE]'}`}>
         <form onSubmit={handleSubmit} className="relative">
@@ -331,7 +344,7 @@ export const Sidebar: React.FC = () => {
       </div>
 
       {/* ==================== OBJECT EXPLORER & AUTO INSPECTOR ==================== */}
-      <div className="flex-1 space-y-4 overflow-y-auto p-3">
+      <div className={`${vp.isPhoneLandscape ? 'space-y-3 p-3' : 'flex-1 space-y-4 overflow-y-auto p-3'}`}>
         {/* ---------- 3D OBJECTS LIST ---------- */}
         {show3DList && (
           <div className="space-y-2">

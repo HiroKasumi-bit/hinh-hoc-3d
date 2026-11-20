@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { Axis3D, Eye, Layers, SlidersHorizontal, Sparkles, X } from 'lucide-react';
 import { useGeometryStore } from '../store/useGeometryStore';
+import { useViewportProfile } from '../hooks/useViewportProfile';
 import { compileExpression } from '../math/parser';
 import { formatNum } from '../math/geometry2d';
 import {
@@ -77,10 +78,21 @@ interface ZDragHud {
 // ==================== CAMERA CONTROLLER & PNG EXPORT BRIDGE ====================
 
 const CameraRig: React.FC<{ controlsRef: React.RefObject<OrbitControlsImpl | null> }> = ({ controlsRef }) => {
-  const { camera, gl, scene } = useThree();
+  const { camera, gl, scene, size } = useThree();
   const cameraRequest = useGeometryStore((s) => s.cameraRequest);
   const scene3d = useGeometryStore((s) => s.scene3d);
   const sliders = useGeometryStore((s) => s.sliders);
+
+  // Dynamically widen FOV on portrait phones so the full 3D ground plane & tall shapes stay framed cleanly!
+  useEffect(() => {
+    if (!(camera instanceof THREE.PerspectiveCamera)) return;
+    const aspect = size.width / Math.max(1, size.height);
+    const targetFov = aspect < 0.75 ? 52 : aspect < 1.0 ? 45 : 38;
+    if (Math.abs(camera.fov - targetFov) > 0.5) {
+      camera.fov = targetFov;
+      camera.updateProjectionMatrix();
+    }
+  }, [camera, size.width, size.height]);
 
   useEffect(() => {
     if (!cameraRequest) return;
@@ -1574,7 +1586,8 @@ export const Viewport3D: React.FC = () => {
   const view = useGeometryStore((s) => s.view);
   const updateView = useGeometryStore((s) => s.updateView);
   const requestCamera = useGeometryStore((s) => s.requestCamera);
-  const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
+  const [compactPanelOpen, setCompactPanelOpen] = useState(false);
+  const vp = useViewportProfile();
   const isDark = view.theme === 'dark';
 
   const camButtons: Array<{ id: CameraPreset3D; label: string }> = [
@@ -1585,11 +1598,11 @@ export const Viewport3D: React.FC = () => {
   ];
 
   const controlsPanel = (
-    <>
+    <div className={`flex ${vp.isPhoneLandscape ? 'flex-row items-start gap-2' : 'flex-col items-end gap-1.5'}`}>
       {/* Camera Presets */}
       <div
-        className={`flex items-center overflow-hidden rounded-lg border text-xs font-medium shadow-xs ${
-          isDark ? 'border-slate-700 bg-slate-900/92 text-slate-200' : 'border-[#DCE3EC] bg-white/95 text-[#0F1B2D]'
+        className={`flex ${vp.isPhoneLandscape ? 'flex-col' : 'flex-row'} items-stretch overflow-hidden rounded-lg border text-xs font-medium shadow-xs ${
+          isDark ? 'border-slate-700 bg-slate-900/94 text-slate-200' : 'border-[#DCE3EC] bg-white/96 text-[#0F1B2D]'
         }`}
       >
         {camButtons.map((btn) => (
@@ -1597,7 +1610,7 @@ export const Viewport3D: React.FC = () => {
             key={btn.id}
             type="button"
             onClick={() => requestCamera(btn.id)}
-            className={`px-2.5 py-1.5 transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
+            className={`px-2.5 py-1.5 text-center transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
           >
             {btn.label}
           </button>
@@ -1606,8 +1619,8 @@ export const Viewport3D: React.FC = () => {
 
       {/* Toggles & Opacity */}
       <div
-        className={`flex flex-col gap-1.5 rounded-lg border p-2 text-xs shadow-xs ${
-          isDark ? 'border-slate-700 bg-slate-900/94 text-slate-200' : 'border-[#DCE3EC] bg-white/95 text-[#0F1B2D]'
+        className={`flex flex-col gap-1 rounded-lg border p-2 text-xs shadow-xs ${
+          isDark ? 'border-slate-700 bg-slate-900/94 text-slate-200' : 'border-[#DCE3EC] bg-white/96 text-[#0F1B2D]'
         }`}
       >
         <button
@@ -1674,7 +1687,7 @@ export const Viewport3D: React.FC = () => {
           />
         </div>
       </div>
-    </>
+    </div>
   );
 
   return (
@@ -1687,27 +1700,31 @@ export const Viewport3D: React.FC = () => {
         <Scene3DContent controlsRef={controlsRef} />
       </Canvas>
 
-      {/* Desktop: Always visible top-right studio controls */}
-      <div className="pointer-events-auto absolute top-3 right-3 hidden flex-col items-end gap-1.5 sm:flex">
-        {controlsPanel}
-      </div>
-
-      {/* Mobile (< 640px): Compact collapsible toggle button so 3D plane stays wide open */}
-      <div className="pointer-events-auto absolute top-2.5 right-2.5 flex flex-col items-end gap-1.5 sm:hidden">
-        <button
-          type="button"
-          onClick={() => setMobilePanelOpen((o) => !o)}
-          className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold shadow-xs ${
-            isDark
-              ? 'border-slate-700 bg-slate-900/92 text-slate-200'
-              : 'border-[#DCE3EC] bg-white/95 text-[#0F1B2D]'
-          }`}
+      {/* Desktop: Always expanded; Compact (Portrait & Landscape Phone!): Collapsible pill so 3D canvas stays unobstructed! */}
+      {!vp.isCompact ? (
+        <div className="pointer-events-auto absolute top-3 right-3 flex flex-col items-end gap-1.5">
+          {controlsPanel}
+        </div>
+      ) : (
+        <div
+          className="pointer-events-auto absolute top-2 right-2 flex flex-col items-end gap-1.5"
+          style={{ right: 'max(0.5rem, env(safe-area-inset-right))' }}
         >
-          {mobilePanelOpen ? <X className="h-3.5 w-3.5" /> : <SlidersHorizontal className="h-3.5 w-3.5" />}
-          <span>Hiển thị</span>
-        </button>
-        {mobilePanelOpen && controlsPanel}
-      </div>
+          <button
+            type="button"
+            onClick={() => setCompactPanelOpen((o) => !o)}
+            className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold shadow-xs ${
+              isDark
+                ? 'border-slate-700 bg-slate-900/92 text-slate-200'
+                : 'border-[#DCE3EC] bg-white/95 text-[#0F1B2D]'
+            }`}
+          >
+            {compactPanelOpen ? <X className="h-3.5 w-3.5" /> : <SlidersHorizontal className="h-3.5 w-3.5" />}
+            <span>Hiển thị</span>
+          </button>
+          {compactPanelOpen && controlsPanel}
+        </div>
+      )}
     </div>
   );
 };

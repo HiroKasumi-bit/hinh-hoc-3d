@@ -19,9 +19,11 @@ import {
   X,
 } from 'lucide-react';
 import { useGeometryStore, type QuickSolid3DType } from '../store/useGeometryStore';
+import { useViewportProfile } from '../hooks/useViewportProfile';
 import type { Tool2D, Tool3D } from '../types/geometry';
 
 export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean }> = ({ domain, compact = false }) => {
+  const vp = useViewportProfile();
   const activeTool2D = useGeometryStore((s) => s.activeTool2D);
   const activeTool3D = useGeometryStore((s) => s.activeTool3D);
   const setTool2D = useGeometryStore((s) => s.setTool2D);
@@ -117,7 +119,9 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
   return (
     <>
       <div
-        className={`z-20 flex shrink-0 items-center justify-between gap-1.5 border-b px-2 py-1.5 ${
+        className={`safe-x z-20 flex shrink-0 items-center justify-between gap-1.5 border-b ${
+          vp.isPhoneLandscape ? 'py-1' : 'py-1.5'
+        } ${
           isDark ? 'border-slate-800 bg-[#111827]/95' : 'border-[#E2E7EE] bg-white'
         }`}
       >
@@ -184,14 +188,14 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
           >
             <div
               onClick={(e) => e.stopPropagation()}
-              className={`w-full max-w-lg overflow-hidden rounded-xl border shadow-xl ${
+              className={`flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-xl border shadow-xl ${
                 isDark ? 'border-slate-700 bg-[#111827] text-slate-100' : 'border-[#DCE3EC] bg-white text-[#0F1B2D]'
               }`}
             >
-              <div className={`flex items-center justify-between border-b px-5 py-3.5 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              <div className={`flex shrink-0 items-center justify-between border-b px-4 py-2.5 sm:px-5 sm:py-3.5 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                 <div>
                   <h3 className="text-sm font-bold">Tạo nhanh Hình Không Gian & Đối Tượng Oxyz</h3>
-                  <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  <p className={`hidden text-xs sm:block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                     Điền trực tiếp kích thước hoặc tọa độ — không cần nhớ câu lệnh phức tạp
                   </p>
                 </div>
@@ -205,7 +209,7 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
                 </button>
               </div>
 
-            <div className={`flex border-b text-xs font-semibold ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+            <div className={`flex shrink-0 border-b text-xs font-semibold ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
               {[
                 { id: 'poly', label: 'Đa diện (Lớp 11)' },
                 { id: 'round', label: 'Nón – Trụ – Cầu (Lớp 12)' },
@@ -215,7 +219,7 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
                   key={t.id}
                   type="button"
                   onClick={() => setBuilderTab(t.id as 'poly' | 'round' | 'oxyz')}
-                  className={`flex-1 border-b-2 py-2.5 transition-colors ${
+                  className={`flex-1 border-b-2 py-2 transition-colors ${
                     builderTab === t.id
                       ? 'border-[#1D5CE5] text-[#1D5CE5]'
                       : 'border-transparent opacity-65 hover:opacity-100'
@@ -226,7 +230,7 @@ export const FloatingToolbar: React.FC<{ domain: '2d' | '3d'; compact?: boolean 
               ))}
             </div>
 
-            <div className="p-5">
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
               {builderTab === 'poly' && (
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-2">
